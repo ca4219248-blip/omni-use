@@ -4,14 +4,16 @@ Telegram mode (long polling; run in a terminal or as a service):
 
     python -m omniuse.operator
 
-    /stop [reason]   engage the killswitch — halts the agent immediately
-    /resume          disengage the killswitch
-    /resolve [note]  resolve the pending escalation so the task can continue
-    /status          killswitch + escalation status
+    /stop [reason]        engage the killswitch — halts the agent immediately
+    /resume               disengage the killswitch
+    /resolve [note]      resolve the pending escalation so the task can continue
+    /approve <tool>       approve a confirm-gated tool (e.g. wallet_send)
+    /revoke <tool>        revoke that approval
+    /status               killswitch + escalation status
 
 One-shot CLI (no Telegram needed):
 
-    python -m omniuse.operator stop|resume|resolve|status
+    python -m omniuse.operator stop|resume|resolve|approve <tool>|revoke <tool>|status
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from omniuse import config
+from omniuse import config, permissions as _permissions
 from omniuse.tools import escalate as _escalate
 from omniuse.tools import killswitch as _killswitch
 
@@ -46,9 +48,13 @@ def _handle(message: str) -> str:
         return _killswitch.disengage()
     if cmd == "/resolve":
         return _escalate.resolve(rest.strip() or "resolved via Telegram")
+    if cmd == "/approve":
+        return _permissions.approve(rest.strip())
+    if cmd == "/revoke":
+        return _permissions.revoke(rest.strip())
     if cmd == "/status":
-        return _killswitch.killswitch_status() + "\n" + _escalate.escalate_status()
-    return "Unknown command. Use /stop, /resume, /resolve or /status."
+        return (_killswitch.killswitch_status() + "\n" + _escalate.escalate_status())
+    return "Unknown command. Use /stop, /resume, /resolve, /approve, /revoke or /status."
 
 
 def run_cli(argv: list[str]) -> int:
@@ -59,10 +65,14 @@ def run_cli(argv: list[str]) -> int:
         out = _killswitch.disengage()
     elif word == "resolve":
         out = _escalate.resolve("resolved via operator CLI")
+    elif word == "approve" and len(argv) > 1:
+        out = _permissions.approve(argv[1])
+    elif word == "revoke" and len(argv) > 1:
+        out = _permissions.revoke(argv[1])
     elif word == "status":
         out = _killswitch.killswitch_status() + "\n" + _escalate.escalate_status()
     else:
-        out = f"Unknown command '{word}'. Use stop|resume|resolve|status."
+        out = "Usage: stop | resume | resolve | approve <tool> | revoke <tool> | status"
     print(out)
     return 0
 
@@ -72,7 +82,7 @@ def run_telegram() -> int:
     if not token:
         print("Set OMNIUSE_TELEGRAM_BOT_TOKEN (and _CHAT_ID) to use Telegram mode.")
         return 1
-    print("OmniUse operator daemon running — commands: /stop /resume /resolve /status")
+    print("OmniUse operator daemon running — commands: /stop /resume /resolve /approve /revoke /status")
     offset = 0
     while True:
         try:

@@ -101,6 +101,23 @@ def send_cmd() -> str:
     return os.getenv("OMNIUSE_SEND_CMD", "")
 
 
+# --------------------------------------------------------- hub / plugins
+
+def hub_url() -> str:
+    """URL of a remote OmniUse Hub (the agent's distant body)."""
+    return os.getenv("OMNIUSE_HUB_URL", "")
+
+
+def hub_token() -> str:
+    """Shared secret for the hub (must match on both ends)."""
+    return os.getenv("OMNIUSE_HUB_TOKEN", "")
+
+
+def plugins_dir() -> str:
+    """Folder scanned for plugin toolsets (each: plugin.json + main.py)."""
+    return os.getenv("OMNIUSE_PLUGINS_DIR", "plugins")
+
+
 def warn_if_unconfigured() -> str | None:
     if not api_key():
         return (
