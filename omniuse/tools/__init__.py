@@ -11,13 +11,18 @@ from __future__ import annotations
 
 import json
 
-from omniuse.tools import browser, mobile, system, vision
+from omniuse.tools import browser, escalate, killswitch, memory, mobile, policy, system, vision, wallet
 
 TOOLSETS: dict[str, dict] = {
     "browser": browser.TOOLS,
     "mobile": mobile.TOOLS,
     "system": system.TOOLS,
     "vision": vision.TOOLS,
+    "policy": policy.TOOLS,
+    "wallet": wallet.TOOLS,
+    "escalate": escalate.TOOLS,
+    "memory": memory.TOOLS,
+    "killswitch": killswitch.TOOLS,
 }
 
 _ALL_TOOLS: dict[str, tuple] = {}
