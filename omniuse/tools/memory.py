@@ -1,8 +1,11 @@
-"""Memory toolset — a persistent, append-only record of what the agent did and why.
+"""Memory toolset — persistent, layered memory of facts and actions.
 
-The agent loop auto-logs every tool call; memory_log() is for the agent's
-explicit decisions and reasoning. Everything lands in an append-only JSONL
-file the operator can review at any time.
+Layers:
+  - event log: append-only log.jsonl — every tool call is auto-logged here
+    by the agent loop; memory_log() adds explicit decisions and reasoning.
+  - fact store: key→value memory that survives across runs, split into
+    layers (preferences / device / project) so the agent can remember
+    things like "my GitHub username is …" without being told twice.
 """
 
 from __future__ import annotations
@@ -13,11 +16,24 @@ from pathlib import Path
 
 from omniuse import config
 
+LAYERS = ("preferences", "device", "project")
 
-def _log_path() -> Path:
+
+def _data_dir() -> Path:
     d = Path(config.data_dir()) / "memory"
     d.mkdir(parents=True, exist_ok=True)
-    return d / "log.jsonl"
+    return d
+
+
+def _log_path() -> Path:
+    return _data_dir() / "log.jsonl"
+
+
+def _store_path() -> Path:
+    return _data_dir() / "store.json"
+
+
+# ------------------------------------------------------------ event log
 
 
 def log_event(kind: str, **fields) -> None:
@@ -59,6 +75,47 @@ def memory_search(query: str, limit: int = 20) -> str:
     if not hits:
         return f"No memory entries match '{query}'."
     return "\n".join(_format(e) for e in hits[-max(1, min(limit, 100)):])
+
+
+# ------------------------------------------------------------ fact store
+
+
+def _load_store() -> dict:
+    p = _store_path()
+    return json.loads(p.read_text()) if p.exists() else {layer: {} for layer in LAYERS}
+
+
+def _save_store(store: dict) -> None:
+    _store_path().write_text(json.dumps(store, indent=2, ensure_ascii=False))
+
+
+def memory_save(key: str, value, layer: str = "preferences") -> str:
+    if layer not in LAYERS:
+        return f"ERROR: layer must be one of {LAYERS}"
+    if not key.strip():
+        return "ERROR: key is required."
+    store = _load_store()
+    store[layer][key.strip()] = value
+    _save_store(store)
+    log_event("memory_saved", key=key, layer=layer)
+    return f"Saved {layer}/{key} — I'll remember this across runs."
+
+
+def memory_get(key: str) -> str:
+    key = key.strip()
+    store = _load_store()
+    hits = [f"{layer}/{key} = {store[layer][key]}"
+            for layer in LAYERS if key in store.get(layer, {})]
+    if not hits:
+        return f"I don't have '{key}' in memory. Ask the user, then memory_save() it."
+    return "\n".join(hits)
+
+
+def memory_forget(key: str) -> str:
+    store = _load_store()
+    removed = [layer for layer in LAYERS if store.get(layer, {}).pop(key, None) is not None]
+    _save_store(store)
+    return f"Forgot '{key}' from {removed}." if removed else f"'{key}' was not in memory."
 
 
 TOOLS = {
@@ -104,6 +161,50 @@ TOOLS = {
                     "limit": {"type": "integer", "description": "Max results (default 20)"},
                 },
                 "required": ["query"],
+            },
+        },
+    }),
+    "memory_save": (memory_save, {
+        "type": "function",
+        "function": {
+            "name": "memory_save",
+            "description": (
+                "Remember a fact across runs (e.g. the user's GitHub username, a "
+                "device quirk, a project path). Check memory_get() before asking the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "value": {"description": "The fact to remember (string/number/JSON)"},
+                    "layer": {"type": "string", "enum": ["preferences", "device", "project"],
+                              "description": "preferences (about the user), device (about this machine), project"},
+                },
+                "required": ["key", "value"],
+            },
+        },
+    }),
+    "memory_get": (memory_get, {
+        "type": "function",
+        "function": {
+            "name": "memory_get",
+            "description": "Recall a remembered fact.",
+            "parameters": {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+            },
+        },
+    }),
+    "memory_forget": (memory_forget, {
+        "type": "function",
+        "function": {
+            "name": "memory_forget",
+            "description": "Delete a remembered fact.",
+            "parameters": {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
             },
         },
     }),
