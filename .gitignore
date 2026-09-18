@@ -1,0 +1,18 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# agent artefacts
+screenshots/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
