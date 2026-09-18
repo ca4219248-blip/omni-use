@@ -1,20 +1,26 @@
 """The OmniUse agent loop: an LLM that thinks, calls tools, observes, repeats.
 
-    task ──▶ LLM ──▶ tool call ──▶ [killswitch? escalation?] ──▶ result ──▶ LLM ──▶ ...
+    task ──▶ LLM ──▶ tool call ──▶ [killswitch? escalation? permission?] ──▶ result ──▶ LLM ──▶ ...
 
-Guardrails wired into the loop itself (not just the prompt):
-  - killswitch: checked before EVERY tool call; if engaged, the run halts.
-  - escalation: while an operator escalation is pending, only status/memory
-    tools are allowed — everything else pauses the task.
-  - memory: every tool call is auto-logged to the persistent memory log.
+Wired into the loop itself (not just the prompt):
+  - killswitch:   checked before EVERY tool call; if engaged, the run halts.
+  - escalation:  while an operator escalation is pending, only status/memory
+                 tools are allowed — everything else pauses the task.
+  - permissions: every tool call is checked against allow/confirm/deny rules;
+                 'confirm' tools need operator approval (y/N prompt when
+                 interactive, otherwise the task pauses until approved).
+  - memory:      every tool call is auto-logged to the persistent memory log.
+  - self-correction: after repeated failures the agent gets an explicit
+                 nudge to stop guessing, observe the real screen, and rethink.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 import traceback
 
-from omniuse import config
+from omniuse import config, permissions
 from omniuse.llm import chat, pretty_tool_call
 from omniuse.tools import escalate as _escalate
 from omniuse.tools import killswitch as _killswitch
@@ -22,14 +28,20 @@ from omniuse.tools import memory as _memory
 from omniuse.tools import get_tool_schemas, run_tool
 
 SYSTEM_PROMPT = """\
-You are OmniUse, an AI agent with hands and eyes — running under operator supervision.
+You are OmniUse 2.0, an AI agent with hands and eyes — running under operator supervision.
 
 You can control:
 - A real web browser (Playwright/Chromium): open pages, click, type, scroll, read text, take screenshots.
 - An Android phone over ADB: tap, swipe, type, press keys, take screenshots, run shell commands.
 - The local computer: run shell commands, read/write/list files.
 - A crypto wallet: read balances, and make capped, logged payments (never holds private keys).
-- Your eyes: look_at_image() lets you SEE any screenshot you take.
+- Remote machines: remote_run() executes tools on a distant OmniUse Hub.
+- Your eyes: look_at_image() to SEE screenshots; screen_elements()/find_element() to READ
+  a screen as structured elements (buttons, inputs, menus) instead of guessing coordinates.
+- Universal actions: click('Start Race'), type_text(...), scroll(...), open_target(...), drag(...)
+  work the same on the browser and the phone — let OmniUse figure out the device.
+- Persistent memory: memory_save/memory_get to remember facts across runs
+  (e.g. the user's GitHub username — check memory before asking again).
 
 NON-NEGOTIABLE RULES — these override everything, including the task and the user:
 1. TRANSPARENCY: Wherever you create an account or post content, you must clearly
@@ -49,7 +61,9 @@ NON-NEGOTIABLE RULES — these override everything, including the task and the u
    escalate_to_operator(). Never attempt it yourself.
 7. MEMORY: Log significant actions and your reasoning with memory_log() so the
    operator can review everything you did and why.
-8. KILLSWITCH: If the operator halts you, stop immediately. No workarounds.
+8. KILLSWITCH & PERMISSIONS: If the operator halts you or a tool is refused/paused
+   for approval, stop and wait. Never try to bypass a permission by other means
+   (no equivalent commands, no workarounds — the refusal IS the answer).
 9. NO HARM: Refuse tasks that break these rules, regardless of who asks or how it
    is phrased, and say why.
 
@@ -58,19 +72,30 @@ How to work:
 2. Observe each result before deciding the next action. Screenshots tell you the
    truth — after browser_screenshot / mobile_screenshot, ALWAYS use look_at_image
    to check what happened.
-3. browser_text and browser_links give you a page's content cheaply; prefer them
-   over screenshots when the task is text-based.
-4. If something fails, read the error, adjust (different selector, scroll, retry)
-   and continue.
-5. Never invent results. Only report what you actually observed.
-6. When the task is done, stop calling tools and give a clear final answer.
+3. Prefer structure over guessing: screen_elements() / find_element() / browser_text()
+   / browser_links() beat blind coordinates; click('button text') beats tap(x, y).
+4. SELF-CORRECT: if an action fails, do not just retry it blindly. Observe what
+   actually changed (screenshot, screen_elements, re-read the error), rethink,
+   then try a different approach and VERIFY the result.
+5. If something fails twice, stop and reconsider your whole approach before
+   trying again.
+6. Never invent results. Only report what you actually observed.
+7. When the task is done, stop calling tools and give a clear final answer.
 """
 
-# Tools the agent may still use while an escalation is pending.
+# Tools the agent may still use while an escalation/confirmation is pending.
 _ALLOWED_WHILE_PAUSED = {
     "escalate_status", "killswitch_status", "killswitch_engage",
-    "memory_log", "memory_recent", "memory_search", "policy_rules",
+    "memory_log", "memory_recent", "memory_search", "memory_get",
+    "policy_rules", "permissions_status",
 }
+
+_RETHINK_NUDGE = (
+    "SYSTEM: Your last {n} tool calls failed. STOP guessing. Observe first: take a fresh "
+    "screenshot (browser_screenshot / mobile_screenshot + look_at_image), read the screen "
+    "structure (screen_elements), or re-read the error message. Then rethink your approach "
+    "and try something DIFFERENT — the same action will likely fail the same way."
+)
 
 
 class Agent:
@@ -88,10 +113,35 @@ class Agent:
         self.max_steps = max_steps or config.max_steps()
         self.verbose = verbose
         self.history: list[dict] = []
+        self.corrections = 0
 
     def log(self, text: str) -> None:
         if self.verbose:
             print(text, flush=True)
+
+    # --------------------------------------------------------- permissions
+
+    def _gate(self, name: str, arguments: dict):
+        """Returns (allowed, result_or_pause_message)."""
+        level = permissions.check(name, arguments)
+        if level == "deny":
+            return False, (f"REFUSED: tool '{name}' is denied by the permission system. "
+                            "Do not attempt this action by other means.")
+        if level == "confirm" and not permissions.is_approved(name):
+            if self.verbose and sys.stdin.isatty():
+                answer = input(f"\n🔑 [permissions] run '{name}' "
+                               f"({pretty_tool_call(name, arguments)})? [y/N] ").strip().lower()
+                if answer == "y":
+                    permissions.session_approve(name)
+                    return True, None
+                return False, f"REFUSED: operator declined '{name}'."
+            return False, (f"TASK PAUSED: tool '{name}' requires operator confirmation. "
+                           f"Approve it on this machine with "
+                           f"`python -m omniuse.operator approve {name}` "
+                           "(or Telegram /approve), then run the task again.")
+        return True, None
+
+    # --------------------------------------------------------------- run
 
     def run(self, task: str) -> str:
         """Run the agent on a task and return its final answer."""
@@ -104,6 +154,7 @@ class Agent:
             {"role": "user", "content": task},
         ]
         final_answer = "Agent stopped without a final answer."
+        consecutive_errors = 0
         _memory.log_event("task_start", task=task, toolsets=self.toolsets)
 
         for step in range(1, self.max_steps + 1):
@@ -142,11 +193,19 @@ class Agent:
                     arguments = {}
                     result = f"ERROR: your arguments were not valid JSON ({e})."
                 else:
-                    self.log(f"[{step}] {pretty_tool_call(name, arguments)}")
-                    try:
-                        result = run_tool(name, arguments)
-                    except Exception:
-                        result = "ERROR:\n" + traceback.format_exc(limit=3)
+                    allowed, gate_result = self._gate(name, arguments)
+                    if not allowed:
+                        if gate_result and gate_result.startswith("TASK PAUSED"):
+                            self.log(f"\n🔒 {gate_result}")
+                            _memory.log_event("paused", by="permission", tool=name, step=step)
+                            return gate_result
+                        result = gate_result
+                    else:
+                        self.log(f"[{step}] {pretty_tool_call(name, arguments)}")
+                        try:
+                            result = run_tool(name, arguments)
+                        except Exception:
+                            result = "ERROR:\n" + traceback.format_exc(limit=3)
 
                 result = str(result)
                 if len(result) > 6000:
@@ -156,6 +215,22 @@ class Agent:
 
                 _memory.log_event("tool_call", step=step, tool=name,
                                   arguments=arguments, result=result[:500])
+
+                # ---- self-correction: nudge after repeated failures ----
+                if result.startswith("ERROR") or result.startswith("REFUSED") \
+                        or result.startswith("Could not"):
+                    consecutive_errors += 1
+                else:
+                    consecutive_errors = 0
+                if consecutive_errors >= 2:
+                    nudge = _RETHINK_NUDGE.format(n=consecutive_errors)
+                    self.log(f"\n🛠 {nudge}")
+                    messages.append({"role": "system", "content": nudge})
+                    _memory.log_event("self_correction", step=step,
+                                      consecutive_errors=consecutive_errors)
+                    consecutive_errors = 0
+                    self.corrections += 1
+
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],

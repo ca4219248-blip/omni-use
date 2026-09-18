@@ -4,14 +4,17 @@ Each toolset module exposes a TOOLS dict:
 
     TOOLS = { "tool_name": (callable, json_schema_for_function_calling), ... }
 
-The schema format is the OpenAI function-calling format.
+The schema format is the OpenAI function-calling format. Plugins in
+plugins/*/ are loaded the same way — see omniuse/plugins/.
 """
 
 from __future__ import annotations
 
 import json
 
+from omniuse import config
 from omniuse.tools import browser, escalate, killswitch, memory, mobile, policy, system, vision, wallet
+from omniuse.tools import remote, screen, universal
 
 TOOLSETS: dict[str, dict] = {
     "browser": browser.TOOLS,
@@ -23,7 +26,25 @@ TOOLSETS: dict[str, dict] = {
     "escalate": escalate.TOOLS,
     "memory": memory.TOOLS,
     "killswitch": killswitch.TOOLS,
+    "screen": screen.TOOLS,
+    "universal": universal.TOOLS,
+    "remote": remote.TOOLS,
 }
+
+# ---- plugins (loaded from plugins/ — see omniuse/plugins/__init__.py) ----
+try:
+    from pathlib import Path as _Path
+
+    from omniuse import permissions as _permissions
+    from omniuse.plugins import load_plugins, plugin_rules
+
+    for _name, _tools in load_plugins(config.plugins_dir()).items():
+        TOOLSETS[_name] = _tools
+    # enforce permissions declared in plugin manifests, just like built-ins
+    for _manifest in _Path(config.plugins_dir()).glob("*/plugin.json"):
+        _permissions.register_rules(plugin_rules(_manifest))
+except Exception as _e:  # noqa: BLE001 — plugins must never break the agent
+    print(f"[plugins] loader failed: {_e}")
 
 _ALL_TOOLS: dict[str, tuple] = {}
 for _tools in TOOLSETS.values():

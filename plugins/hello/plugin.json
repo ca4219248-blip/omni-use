@@ -1,0 +1,6 @@
+{
+  "name": "hello",
+  "description": "Example plugin — says hello, shows how the SDK works.",
+  "entry": "main.py",
+  "permissions": {}
+}
