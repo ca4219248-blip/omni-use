@@ -5,6 +5,8 @@ Setup:
     playwright install chromium
 
 Set OMNIUSE_HEADLESS=0 to actually watch the browser.
+Set OMNIUSE_PROFILE_DIR to a folder to keep a persistent profile — logins,
+cookies and storage then survive across runs.
 """
 
 from __future__ import annotations
@@ -17,18 +19,34 @@ from omniuse import config
 
 _pw = None
 _browser = None
+_context = None
 _page = None
 
 
 def _get_page():
-    global _pw, _browser, _page
+    global _pw, _browser, _context, _page
     if _page is None:
         from playwright.sync_api import sync_playwright
 
         _pw = sync_playwright().start()
-        _browser = _pw.chromium.launch(headless=config.headless_browser())
-        _page = _browser.new_page(viewport={"width": 1280, "height": 800})
+        profile = os.getenv("OMNIUSE_PROFILE_DIR", "")
+        if profile:
+            # persistent profile → logins, cookies and storage survive restarts
+            _context = _pw.chromium.launch_persistent_context(
+                profile, headless=config.headless_browser(),
+                viewport={"width": 1280, "height": 800})
+            _page = _context.pages[0] if _context.pages else _context.new_page()
+        else:
+            _browser = _pw.chromium.launch(headless=config.headless_browser())
+            _context = _browser.new_context(viewport={"width": 1280, "height": 800})
+            _page = _context.new_page()
     return _page
+
+
+def _all_pages():
+    if _context is not None:
+        return _context.pages
+    return [_page] if _page is not None else []
 
 
 # ---------------------------------------------------------------- actions
@@ -102,6 +120,47 @@ def browser_links(max_links: int = 20) -> str:
     if not lines:
         return "No links found."
     return "\n".join(lines[:max_links])
+
+
+def browser_url() -> str:
+    page = _get_page()
+    return f"URL: {page.url}\nTitle: {page.title()}"
+
+
+def browser_wait_for(text: str, timeout: int = 10) -> str:
+    _get_page().wait_for_selector(f"text={text}", timeout=max(1, timeout) * 1000)
+    return f"'{text}' appeared on the page."
+
+
+def browser_tabs() -> str:
+    pages = _all_pages()
+    if not pages:
+        return "No open tabs."
+    return "\n".join(f"{i}: {p.url}" for i, p in enumerate(pages))
+
+
+def browser_switch_tab(index: int = 0) -> str:
+    global _page
+    pages = _all_pages()
+    if not pages or not (0 <= int(index) < len(pages)):
+        return f"ERROR: tab index out of range (0-{max(0, len(pages) - 1)})."
+    _page = pages[int(index)]
+    try:
+        _page.bring_to_front()
+    except Exception:
+        pass
+    return f"Switched to tab {index}: {_page.url}"
+
+
+def browser_eval(js: str) -> str:
+    if not js.strip():
+        return "ERROR: js is required."
+    try:
+        result = _get_page().evaluate(js)
+    except Exception as e:
+        return f"ERROR: {type(e).__name__}: {e}"
+    text = repr(result)
+    return text[:4000] if len(text) > 4000 else text or "(undefined)"
 
 
 # ---------------------------------------------------------------- registry
@@ -211,6 +270,60 @@ TOOLS = {
             "parameters": {
                 "type": "object",
                 "properties": {"max_links": {"type": "integer", "description": "Default 20"}},
+            },
+        },
+    }),
+    "browser_url": (browser_url, {
+        "type": "function",
+        "function": {
+            "name": "browser_url",
+            "description": "Get the current page's URL and title.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }),
+    "browser_wait_for": (browser_wait_for, {
+        "type": "function",
+        "function": {
+            "name": "browser_wait_for",
+            "description": "Wait until text appears on the page (e.g. after a click loads something).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "timeout": {"type": "integer", "description": "Seconds (default 10)"},
+                },
+                "required": ["text"],
+            },
+        },
+    }),
+    "browser_tabs": (browser_tabs, {
+        "type": "function",
+        "function": {
+            "name": "browser_tabs",
+            "description": "List the open browser tabs.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }),
+    "browser_switch_tab": (browser_switch_tab, {
+        "type": "function",
+        "function": {
+            "name": "browser_switch_tab",
+            "description": "Switch the active browser tab by index (see browser_tabs).",
+            "parameters": {
+                "type": "object",
+                "properties": {"index": {"type": "integer"}},
+            },
+        },
+    }),
+    "browser_eval": (browser_eval, {
+        "type": "function",
+        "function": {
+            "name": "browser_eval",
+            "description": "Run JavaScript in the current page and return the result.",
+            "parameters": {
+                "type": "object",
+                "properties": {"js": {"type": "string", "description": "JavaScript expression to evaluate"}},
+                "required": ["js"],
             },
         },
     }),

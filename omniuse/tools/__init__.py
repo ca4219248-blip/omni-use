@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 
 from omniuse import config
-from omniuse.tools import browser, escalate, killswitch, memory, mobile, policy, system, vision, wallet
+from omniuse.tools import browser, escalate, killswitch, memory, mobile, policy, system, team, vision, wallet
 from omniuse.tools import remote, screen, universal
 
 TOOLSETS: dict[str, dict] = {
@@ -29,6 +29,7 @@ TOOLSETS: dict[str, dict] = {
     "screen": screen.TOOLS,
     "universal": universal.TOOLS,
     "remote": remote.TOOLS,
+    "team": team.TOOLS,
 }
 
 # ---- plugins (loaded from plugins/ — see omniuse/plugins/__init__.py) ----

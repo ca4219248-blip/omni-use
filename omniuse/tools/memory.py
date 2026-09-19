@@ -89,6 +89,20 @@ def _save_store(store: dict) -> None:
     _store_path().write_text(json.dumps(store, indent=2, ensure_ascii=False))
 
 
+def snapshot(max_facts: int = 30) -> dict:
+    """All remembered facts (capped), for injection into agent context."""
+    store = _load_store()
+    out: dict = {}
+    count = 0
+    for layer in LAYERS:
+        for key, value in store.get(layer, {}).items():
+            out.setdefault(layer, {})[key] = value
+            count += 1
+            if count >= max_facts:
+                return out
+    return out
+
+
 def memory_save(key: str, value, layer: str = "preferences") -> str:
     if layer not in LAYERS:
         return f"ERROR: layer must be one of {LAYERS}"
