@@ -33,6 +33,8 @@ DEFAULT_RULES = [
     {"tool": "remote_run", "level": "confirm"},
     # destructive shell commands need a human
     {"tool": "system_run", "pattern": r"rm\s+-rf|mkfs|dd\s+if=|>\s*/dev/sd|shutdown|reboot|halt|:\(\)\s*\{", "level": "confirm"},
+    # shop: only the operator (or a verified bank SMS) may mark an order paid
+    {"tool": "order_mark_paid", "level": "deny"},
 ]
 
 _extra_rules: list[dict] = []      # registered by the plugin loader
@@ -75,7 +77,6 @@ def check(tool: str, arguments: dict | None = None) -> str:
         if rule["level"] == "confirm":
             level = "confirm"
     return level
-
 
 # ---------------------------------------------------------------- approvals
 

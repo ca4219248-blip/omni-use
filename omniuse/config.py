@@ -118,6 +118,16 @@ def plugins_dir() -> str:
     return os.getenv("OMNIUSE_PLUGINS_DIR", "plugins")
 
 
+def upi_vpa() -> str:
+    """The operator's UPI ID (e.g. name@okhdfcbank) for shop payments."""
+    return os.getenv("OMNIUSE_UPI_VPA", "")
+
+
+def payee_name() -> str:
+    """Name shown on UPI payment requests / watermarks."""
+    return os.getenv("OMNIUSE_PAYEE_NAME", "")
+
+
 def warn_if_unconfigured() -> str | None:
     if not api_key():
         return (
