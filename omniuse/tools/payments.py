@@ -229,10 +229,9 @@ def payment_check_sms(minutes: int = 120, mark_paid: bool = True) -> str:
     paid = []
     for text in hits:
         amounts = [float(a.replace(",", "")) for a in
-                   re.findall(r"(?:Rs\\.?|₹|INR)\\s*([0-9]+(?:\\.[0-9]+)?)", text)]
+                   re.findall(r"(?:Rs\.?|₹|INR)\s*([0-9]+(?:\.[0-9]+)?)", text)]
         for order in _orders():
-            if order["state"] in ("payment_claimed", "preview_sent", "created") \\
-                    and abs(order["price"] - (amounts[0] if amounts else -1)) < 0.01:
+            if order["state"] in ("payment_claimed", "preview_sent", "created") and abs(order["price"] - (amounts[0] if amounts else -1)) < 0.01:
                 if mark_paid:
                     _transition(order, "paid", f"credit SMS: {text[:150]}")
                 paid.append(f"{order['id']} ₹{order['price']:.2f}")
