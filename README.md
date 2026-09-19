@@ -7,7 +7,7 @@
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 2.0                   │
+                 │                    OmniUse 3.0                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -16,7 +16,8 @@
                     │         │         │         │         │
                🌐 Browser  📱 Mobile  💻 System  👁 Vision  🖥 Remote
                🔒 Policy   💰 Wallet  ⚠️ Escalate  🧠 Memory  🛑 Killswitch
-               🖱 Universal 📺 Screen  🔌 Plugins  🚀 Missions
+               🖱 Universal 📺 Screen  🔌 Plugins  🚀 Missions  🕒 Scheduler
+               🧑‍🤝‍🧑 Team     🧾 Budget   🎨 Design   💸 Payments  🛍 Shop
 ```
 
 ## What it gives your AI
@@ -34,8 +35,11 @@
 | **escalate** | Pause + notify the operator (Telegram) whenever something legally needs a human |
 | **memory** | Layered persistent memory: append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) so "mera GitHub username yaad rakhna" actually works across runs |
 | **killswitch** | One switch, zero activity — checked before **every** tool call |
-| **remote** | Run tools on distant machines via **OmniUse Hub** — the AI's remote body |
+| **remote** | Run tools on distant machines via **OmniUse Hub** — the AI's remote body (named hub registry) |
 | **team** | `spawn_worker()` — delegate sub-tasks to fresh worker agents (planner + workers) |
+| **design** | `design_poster()` PIL posters (offline) + `design_ai_image()` + `design_watermark()` previews |
+| **payments** | UPI QR (amount pre-filled), order state machine, screenshot reading, **SMS payment verification** |
+| **shop** | Catalog, proposals for inbound clients, listing drafts for your own page |
 
 The agent works with **any OpenAI-compatible LLM** — OpenAI, Groq, OpenRouter, Together, or a local Ollama/vLLM server.
 
@@ -89,7 +93,7 @@ Every tool call is checked against `data/permissions.json`:
 - **confirm** — interactive y/N prompt; in non-interactive runs the task pauses until you run `python -m omniuse.operator approve <tool>` (or Telegram `/approve`)
 - **deny** — never runs
 
-Defaults: payments confirm, destructive shell patterns (rm -rf, mkfs, shutdown…) confirm, mobile shell confirm, remote_run confirm, wallet_raise_limit deny. Edit the JSON anytime — no restart needed.
+Defaults: payments confirm, destructive shell patterns (rm -rf, mkfs, shutdown…) confirm, mobile shell confirm, remote_run confirm, wallet_raise_limit deny, order_mark_paid deny (SMS/operator only). Edit the JSON anytime — no restart needed.
 
 ### 🧰 Plugin SDK
 Drop a folder into `plugins/`:
@@ -159,6 +163,29 @@ Persistent profile (`OMNIUSE_PROFILE_DIR`) — logins and cookies survive restar
 ### 🧠 Memory injection
 Facts saved with `memory_save()` are automatically injected into every task's context — the agent remembers without being told twice.
 
+## 3.0 — the design shop 🎨
+
+Sell your designs with a watermark-first, verify-then-deliver pipeline:
+
+```
+client messages you (inbound only)
+   → design_poster() / design_ai_image()        make the design
+   → design_watermark()                         watermarked preview
+   → order_create + order_attach                track the order
+   → payment_qr(₹price)                         your UPI QR, amount pre-filled
+   → client pays, sends screenshot
+   → payment_verify_screenshot()                CLAIMS the order (screenshots can be edited!)
+   → payment_check_sms()                        bank/UPI credit SMS on YOUR phone = VERIFIED
+   → order_delivered()                          clean full-resolution file, only now
+```
+
+Toolsets: **design** (PIL posters + AI images + watermarks), **payments** (UPI QR, order state machine, screenshot reading, SMS verification), **shop** (catalog, proposals for inbound clients, listing drafts for your own page).
+
+Built-in honesty rules:
+- A payment screenshot only *claims* an order — only a credit SMS on your phone or your own confirmation marks it paid.
+- Inbound only: the agent replies to people who contacted you; it will never cold-DM strangers (spam, rule 2). Listings go on your own accounts, after `policy_check`, with AI disclosure.
+- `order_mark_paid` is denied to the agent — only SMS verification or you (operator token) can flip an order to paid.
+
 ## Earning-agent guardrails 🛡️
 
 Wired into the **agent loop itself**, not just the prompt:
@@ -200,6 +227,8 @@ All config is plain environment variables (see `.env.example`). The essentials:
 | `OMNIUSE_PLUGINS_DIR` | `plugins` | Drop-in plugin folder |
 | `OMNIUSE_PROFILE_DIR` | — | Persistent browser profile (logins survive) |
 | `OMNIUSE_DAILY_STEPS` / `_TOOL_CALLS` | `500` | Daily budget caps ("0" = unlimited) |
+| `OMNIUSE_UPI_VPA` | — | Your UPI ID (shop payments) |
+| `OMNIUSE_PAYEE_NAME` | — | Name on payment requests & watermarks |
 | `OMNIUSE_WALLET_MAX_TX` | `0.01` | **Hard per-transaction payment cap** |
 | `OMNIUSE_SEND_CMD` | — | Command that actually signs/sends; empty = queue only |
 | `OMNIUSE_TELEGRAM_BOT_TOKEN` / `_CHAT_ID` | — | Operator alerts + commands |
@@ -213,13 +242,14 @@ All config is plain environment variables (see `.env.example`). The essentials:
 - Exposing the hub beyond localhost (`--host 0.0.0.0`) means anyone with the token can run tools on that machine — use a strong token and a firewall.
 - The scheduler runs missions **without a human watching** — keep daily budgets sane, read the mission reports, and keep the killswitch handy.
 - Crypto payments are irreversible — start with a tiny cap and test in queue-only mode (no `OMNIUSE_SEND_CMD`) first.
+- **Shop**: a payment screenshot can be faked — the agent will not deliver the clean file until a credit SMS lands on your phone (or you confirm). Selling means following platform terms and the law; the agent only handles inbound inquiries, never cold outreach.
 - "Earning" online still means following platform terms and the law. The guardrails exist so the agent stays on the right side of both; don't disable them.
 - Read the memory log regularly — that's what it's for.
 
 ## Roadmap
 
 - [ ] iOS support (via `libimobiledevice` / Appium)
-- [ ] Multi-hub routing (one brain, device registry)
+- [ ] Canva Connect API plugin for the design toolset
 - [ ] Streaming CLI with live step display
 - [ ] Docker sandbox for the `system` toolset
 
