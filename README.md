@@ -23,7 +23,7 @@
 
 | Toolset | What the agent can do |
 |---|---|
-| **browser** | Open pages, click, type, scroll, read text & links, screenshots (Playwright) |
+| **browser** | Open pages, click, type, scroll, read text & links, screenshots, tabs, wait-for, JS eval; optional persistent profile (Playwright) |
 | **mobile** | Tap, swipe, type, press keys, screenshots, `adb shell` on Android |
 | **system** | Run shell commands, read/write/list files |
 | **vision** | *Look at* any screenshot it takes |
@@ -35,6 +35,7 @@
 | **memory** | Layered persistent memory: append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) so "mera GitHub username yaad rakhna" actually works across runs |
 | **killswitch** | One switch, zero activity — checked before **every** tool call |
 | **remote** | Run tools on distant machines via **OmniUse Hub** — the AI's remote body |
+| **team** | `spawn_worker()` — delegate sub-tasks to fresh worker agents (planner + workers) |
 
 The agent works with **any OpenAI-compatible LLM** — OpenAI, Groq, OpenRouter, Together, or a local Ollama/vLLM server.
 
@@ -120,6 +121,44 @@ Token-authenticated, and the hub enforces the same permission rules as local run
 ### 🚀 Autonomous missions
 `Mission("goal")` iterates: work → report status as JSON → checkpoint → repeat, until done/blocked/limit. Blocked missions escalate to the operator. Each mission writes a full report to `data/missions/<id>-report.md`.
 
+## 2.5 — full autonomy (with brakes)
+
+### 🕒 Mission scheduler
+Run missions on autopilot, forever:
+
+```bash
+python -m omniuse.scheduler add "Check server health and report" --every 60 --max-runs 10
+python -m omniuse.scheduler daemon     # checks every 30s, runs what's due
+python -m omniuse.scheduler list
+```
+
+Each run is a full Mission (checkpoints + report). The daemon refuses to run while the killswitch is engaged, and daily budgets cap total activity.
+
+### 🧑‍🤝‍🧑 Team orchestration
+`spawn_worker("research X", toolsets="browser,screen")` gives the main agent a fresh worker agent with its own step budget — parallel or deep sub-tasks while the planner keeps the big picture. Workers inherit every guardrail (killswitch, permissions, budget, logging).
+
+### 🧾 Daily budget
+`OMNIUSE_DAILY_STEPS` / `OMNIUSE_DAILY_TOOL_CALLS` (default 500 each, "0" = unlimited). When a cap is hit, the agent winds down gracefully and says so — no runaway overnight bills. Track with `omniuse.budget.status()`.
+
+### 🖥 Multi-hub registry
+One brain, many named bodies:
+
+```bash
+python -m omniuse.remote add pc1 http://192.168.1.20:8787 <token>
+python -m omniuse.remote list
+```
+
+```python
+remote_hubs()                                   # which bodies exist
+remote_run("browser_open", {"url": "…"}, hub="pc1")
+```
+
+### 🌐 Browser upgrades
+Persistent profile (`OMNIUSE_PROFILE_DIR`) — logins and cookies survive restarts. Plus `browser_wait_for`, `browser_tabs`, `browser_switch_tab`, `browser_url`, `browser_eval`.
+
+### 🧠 Memory injection
+Facts saved with `memory_save()` are automatically injected into every task's context — the agent remembers without being told twice.
+
 ## Earning-agent guardrails 🛡️
 
 Wired into the **agent loop itself**, not just the prompt:
@@ -159,6 +198,8 @@ All config is plain environment variables (see `.env.example`). The essentials:
 | `OMNIUSE_MODEL` | `gpt-4o-mini` | Needs vision for the vision toolset |
 | `OMNIUSE_DATA_DIR` | `data` | Policies, memory, permissions, missions |
 | `OMNIUSE_PLUGINS_DIR` | `plugins` | Drop-in plugin folder |
+| `OMNIUSE_PROFILE_DIR` | — | Persistent browser profile (logins survive) |
+| `OMNIUSE_DAILY_STEPS` / `_TOOL_CALLS` | `500` | Daily budget caps ("0" = unlimited) |
 | `OMNIUSE_WALLET_MAX_TX` | `0.01` | **Hard per-transaction payment cap** |
 | `OMNIUSE_SEND_CMD` | — | Command that actually signs/sends; empty = queue only |
 | `OMNIUSE_TELEGRAM_BOT_TOKEN` / `_CHAT_ID` | — | Operator alerts + commands |
@@ -170,6 +211,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 - The `system` toolset runs **real shell commands**; guardrails are brakes, not a sandbox — the agent has whatever permissions you have.
 - Use the mobile toolset **only on your own device**.
 - Exposing the hub beyond localhost (`--host 0.0.0.0`) means anyone with the token can run tools on that machine — use a strong token and a firewall.
+- The scheduler runs missions **without a human watching** — keep daily budgets sane, read the mission reports, and keep the killswitch handy.
 - Crypto payments are irreversible — start with a tiny cap and test in queue-only mode (no `OMNIUSE_SEND_CMD`) first.
 - "Earning" online still means following platform terms and the law. The guardrails exist so the agent stays on the right side of both; don't disable them.
 - Read the memory log regularly — that's what it's for.
