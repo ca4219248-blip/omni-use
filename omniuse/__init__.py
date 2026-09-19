@@ -3,10 +3,10 @@
 Hands: a real browser, an Android phone (via ADB), the local computer, and
 remote machines via the Hub. Eyes: vision on screenshots + structured screen
 reading. Guardrails: policy checks, a capped wallet, escalation, layered
-memory, permissions, and a killswitch.
+memory, permissions, budgets, and a killswitch.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.5.0"
 
 __all__ = ["Agent", "Mission", "__version__"]
 
