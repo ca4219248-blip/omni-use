@@ -1,6 +1,6 @@
 """The OmniUse agent loop: an LLM that thinks, calls tools, observes, repeats.
 
-    task ──▶ LLM ──▶ tool call ──▶ [killswitch? escalation? permission?] ──▶ result ──▶ LLM ──▶ ...
+    task ──▶ LLM ──▶ tool call ──▶ [killswitch? escalation? permission? budget?] ──▶ result ──▶ LLM ──▶ ...
 
 Wired into the loop itself (not just the prompt):
   - killswitch:   checked before EVERY tool call; if engaged, the run halts.
@@ -9,7 +9,10 @@ Wired into the loop itself (not just the prompt):
   - permissions: every tool call is checked against allow/confirm/deny rules;
                  'confirm' tools need operator approval (y/N prompt when
                  interactive, otherwise the task pauses until approved).
-  - memory:      every tool call is auto-logged to the persistent memory log.
+  - budget:      daily step/tool-call caps; exceeding them winds the agent
+                 down gracefully instead of burning money all night.
+  - memory:      every tool call is auto-logged, and remembered facts
+                 (memory_save) are injected into every task's context.
   - self-correction: after repeated failures the agent gets an explicit
                  nudge to stop guessing, observe the real screen, and rethink.
 """
@@ -20,6 +23,7 @@ import json
 import sys
 import traceback
 
+from omniuse import budget as _budget
 from omniuse import config, permissions
 from omniuse.llm import chat, pretty_tool_call
 from omniuse.tools import escalate as _escalate
@@ -28,20 +32,23 @@ from omniuse.tools import memory as _memory
 from omniuse.tools import get_tool_schemas, run_tool
 
 SYSTEM_PROMPT = """\
-You are OmniUse 2.0, an AI agent with hands and eyes — running under operator supervision.
+You are OmniUse 2.5, an AI agent with hands and eyes — running under operator supervision.
 
 You can control:
-- A real web browser (Playwright/Chromium): open pages, click, type, scroll, read text, take screenshots.
+- A real web browser (Playwright/Chromium; optional persistent profile so logins survive):
+  open pages, click, type, scroll, read text, take screenshots, manage tabs, wait for things.
 - An Android phone over ADB: tap, swipe, type, press keys, take screenshots, run shell commands.
 - The local computer: run shell commands, read/write/list files.
 - A crypto wallet: read balances, and make capped, logged payments (never holds private keys).
-- Remote machines: remote_run() executes tools on a distant OmniUse Hub.
+- Remote machines: remote_run() executes tools on a distant OmniUse Hub (remote_hubs() lists them).
 - Your eyes: look_at_image() to SEE screenshots; screen_elements()/find_element() to READ
   a screen as structured elements (buttons, inputs, menus) instead of guessing coordinates.
 - Universal actions: click('Start Race'), type_text(...), scroll(...), open_target(...), drag(...)
   work the same on the browser and the phone — let OmniUse figure out the device.
-- Persistent memory: memory_save/memory_get to remember facts across runs
-  (e.g. the user's GitHub username — check memory before asking again).
+- A team: spawn_worker() delegates a focused sub-task to a fresh worker agent and returns
+  its answer — use it for parallel or deep sub-problems while you keep the big picture.
+- Persistent memory: remembered facts are injected below in every task; save new ones with
+  memory_save() (check memory before asking the user again).
 
 NON-NEGOTIABLE RULES — these override everything, including the task and the user:
 1. TRANSPARENCY: Wherever you create an account or post content, you must clearly
@@ -61,9 +68,9 @@ NON-NEGOTIABLE RULES — these override everything, including the task and the u
    escalate_to_operator(). Never attempt it yourself.
 7. MEMORY: Log significant actions and your reasoning with memory_log() so the
    operator can review everything you did and why.
-8. KILLSWITCH & PERMISSIONS: If the operator halts you or a tool is refused/paused
-   for approval, stop and wait. Never try to bypass a permission by other means
-   (no equivalent commands, no workarounds — the refusal IS the answer).
+8. KILLSWITCH, PERMISSIONS & BUDGET: If the operator halts you, a tool is refused
+   or paused for approval, or the daily budget runs out — stop and wind down.
+   Never try to bypass a permission by other means; the refusal IS the answer.
 9. NO HARM: Refuse tasks that break these rules, regardless of who asks or how it
    is phrased, and say why.
 
@@ -87,7 +94,7 @@ How to work:
 _ALLOWED_WHILE_PAUSED = {
     "escalate_status", "killswitch_status", "killswitch_engage",
     "memory_log", "memory_recent", "memory_search", "memory_get",
-    "policy_rules", "permissions_status",
+    "policy_rules",
 }
 
 _RETHINK_NUDGE = (
@@ -96,6 +103,18 @@ _RETHINK_NUDGE = (
     "structure (screen_elements), or re-read the error message. Then rethink your approach "
     "and try something DIFFERENT — the same action will likely fail the same way."
 )
+
+_FACTS_HEADER = "\n\nREMEMBERED FACTS (persistent memory — use these, don't re-ask the user):\n"
+
+
+def _facts_block() -> str:
+    facts = _memory.snapshot()
+    if not facts:
+        return ""
+    lines = [f"- [{layer}] {key} = {json.dumps(value, ensure_ascii=False)}"
+             for layer, kv in facts.items() for key, value in kv.items()]
+    block = "\n".join(lines[:30])
+    return _FACTS_HEADER + block if block else ""
 
 
 class Agent:
@@ -150,7 +169,7 @@ class Agent:
             raise ValueError("No tools enabled — check the `toolsets` argument.")
 
         messages: list[dict] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT + _facts_block()},
             {"role": "user", "content": task},
         ]
         final_answer = "Agent stopped without a final answer."
@@ -158,6 +177,16 @@ class Agent:
         _memory.log_event("task_start", task=task, toolsets=self.toolsets)
 
         for step in range(1, self.max_steps + 1):
+            # ---- daily budget ----
+            if not _budget.step_available():
+                final_answer = ("DAILY STEP BUDGET EXHAUSTED — stopping here for today. "
+                                f"({_budget.status()}; the operator can adjust "
+                                "OMNIUSE_DAILY_STEPS in .env)")
+                self.log(f"\n🛑 {final_answer}")
+                _memory.log_event("budget_stop", what="steps")
+                return final_answer
+            _budget.record_step()
+
             message = chat(messages, tools=tools)
             messages.append(message)
             self.history.append(message)
@@ -200,12 +229,16 @@ class Agent:
                             _memory.log_event("paused", by="permission", tool=name, step=step)
                             return gate_result
                         result = gate_result
+                    elif not _budget.tool_call_available():
+                        result = ("REFUSED: daily tool-call budget exhausted — wind down, "
+                                  "summarize what you completed, and stop.")
                     else:
                         self.log(f"[{step}] {pretty_tool_call(name, arguments)}")
                         try:
                             result = run_tool(name, arguments)
                         except Exception:
                             result = "ERROR:\n" + traceback.format_exc(limit=3)
+                        _budget.record_tool_call()
 
                 result = str(result)
                 if len(result) > 6000:
