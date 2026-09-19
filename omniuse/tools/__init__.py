@@ -14,7 +14,7 @@ import json
 
 from omniuse import config
 from omniuse.tools import browser, escalate, killswitch, memory, mobile, policy, system, team, vision, wallet
-from omniuse.tools import remote, screen, universal
+from omniuse.tools import design, payments, remote, screen, shop, universal
 
 TOOLSETS: dict[str, dict] = {
     "browser": browser.TOOLS,
@@ -30,6 +30,9 @@ TOOLSETS: dict[str, dict] = {
     "universal": universal.TOOLS,
     "remote": remote.TOOLS,
     "team": team.TOOLS,
+    "design": design.TOOLS,
+    "payments": payments.TOOLS,
+    "shop": shop.TOOLS,
 }
 
 # ---- plugins (loaded from plugins/ — see omniuse/plugins/__init__.py) ----
