@@ -363,7 +363,11 @@ class Agent:
                         _memory.log_event("stuck_stop", tool=name, step=step)
                         return stuck
                     if same_action == 3:
-                        result = ("REFUSED: you have called this exact tool with these exact "n                                  "arguments 3 times in a row. The action is clearly not "n                                  "working — observe (screenshot / screen_elements / re-read "n                                  "the error), then plan a DIFFERENT action. Repeating it a "n                                  "4th time will stop the task.")
+                        result = ("REFUSED: you have called this exact tool with these exact "
+                                  "arguments 3 times in a row. The action is clearly not "
+                                  "working — observe (screenshot / screen_elements / re-read "
+                                  "the error), then plan a DIFFERENT action. Repeating it a "
+                                  "4th time will stop the task.")
                         messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
                         _memory.log_event("stuck_nudge", tool=name, step=step)
                         continue
@@ -376,7 +380,8 @@ class Agent:
                             return gate_result
                         result = gate_result
                     elif not _budget.tool_call_available():
-                        result = ("REFUSED: daily tool-call budget exhausted — wind down, "n                                  "summarize what you completed, and stop.")
+                        result = ("REFUSED: daily tool-call budget exhausted — wind down, "
+                                  "summarize what you completed, and stop.")
                     else:
                         self.log(f"[{step}] {pretty_tool_call(name, arguments)}")
                         try:
