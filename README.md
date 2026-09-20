@@ -7,7 +7,7 @@
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 3.1                   │
+                 │                    OmniUse 3.2                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -33,13 +33,13 @@
 | **universal** | One API for every device: `click('Start Race')`, `type_text(...)`, `scroll`, `open_target(...)`, `drag(...)` — OmniUse decides if that means the browser or the phone |
 | **policy** | Check/record each platform's automation stance before acting; carries the non-negotiable rules |
 | **wallet** | Read balances; **capped, logged** payments; limit raises need the operator's secret token; never touches private keys |
-| **escalate** | Pause + notify the operator (Telegram) whenever something legally needs a human |
+| **escalate** | Pause + raise a loud operator alert (terminal banner + alert file) whenever something legally needs a human |
 | **memory** | Layered persistent memory: append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) so "mera GitHub username yaad rakhna" actually works across runs |
 | **killswitch** | One switch, zero activity — checked before **every** tool call |
 | **remote** | Run tools on distant machines via **OmniUse Hub** — the AI's remote body (named hub registry) |
 | **team** | `spawn_worker()` — delegate sub-tasks to fresh worker agents (planner + workers) |
 | **design** | `design_poster()` PIL posters (offline) + `design_ai_image()` + `design_watermark()` previews |
-| **payments** | UPI QR (amount pre-filled), order state machine, screenshot reading, **SMS payment verification** |
+| **payments** | UPI QR (amount pre-filled), order state machine, screenshot reading, **SMS payment verification + payment_wait** |
 | **shop** | Catalog, proposals for inbound clients, listing drafts for your own page, **prospect tracking + outreach drafts (operator-sent, one-message rule)** |
 | **ideas** | `idea_save`/`idea_list`/`idea_update` — a self-starter: when you have no idea, the agent brainstorms, scores and picks one itself |
 
@@ -92,7 +92,7 @@ Failures don't stop the agent — after two failed calls the loop injects an exp
 ### 🛡️ Permission system
 Every tool call is checked against `data/permissions.json`:
 - **allow** — runs
-- **confirm** — interactive y/N prompt; in non-interactive runs the task pauses until you run `python -m omniuse.operator approve <tool>` (or Telegram `/approve`)
+- **confirm** — interactive y/N prompt; in non-interactive runs the task pauses until you run `python -m omniuse.operator approve <tool>` (or `approve <tool>` in the console)
 - **deny** — never runs
 
 Defaults: payments confirm, destructive shell patterns (rm -rf, mkfs, shutdown…) confirm, mobile shell confirm, remote_run confirm, wallet_raise_limit deny, order_mark_paid deny (SMS/operator only). Edit the JSON anytime — no restart needed.
@@ -206,18 +206,44 @@ agent:  prospect_add("Sharma Sweets", source="google maps", notes="mithai shop")
         outreach_draft("Sharma Sweets", "Shop poster design")   → personalised draft
 you:    send it yourself, from your own WhatsApp — once
         no reply? → prospect_status('contacted')  …and the agent REFUSES any second draft
-        reply?   → prospect_status('replied')     …order flow continues (watermark → QR → /paid)
+        reply?   → prospect_status('replied')     …order flow continues (watermark → QR → paid)
 ```
 
 Why the agent doesn't send first-contact messages itself: automated unsolicited messages get your account banned (spam, platform ToS) — and one honest message from you converts better than a hundred bot blasts anyway.
 
-Confirming a payment from your phone:
+Confirming a payment from your terminal:
 
 ```
-/orders              → see every order + state
-/paid ord-1234-abc   → YOU confirming the money arrived — order turns paid
+orders              → see every order + state
+paid ord-1234-abc   → YOU confirming the money arrived — order turns paid
                        and the agent can deliver the clean file
 ```
+
+## 3.2 — terminal + voice control, self-checking payments 🎙
+
+No external messaging services — everything runs in your terminal, and you can just *speak*:
+
+```
+python -m omniuse.operator        # console: commands AND free-text tasks
+omniuse> bhai mujhe 300 rupay chahiye       ← typed or spoken
+omniuse> orders / paid ord-1234-abc / stop / status
+
+python -m omniuse.voice listen    # 10s mic recording → transcribed → routed
+python -m omniuse.voice listen 30 # 30 seconds
+python -m omniuse.voice file v.wav  # a saved voice note
+```
+
+Voice needs `OMNIUSE_STT_MODEL` (default `whisper-1`) on any OpenAI-compatible provider; mic recording additionally needs `pip install sounddevice numpy scipy`. "stop", "orders", "paid <id>"… route to the operator console; everything else runs as an agent task.
+
+The agent checks payments itself now:
+
+```
+client: "bhai payment kar diya"
+agent:  payment_wait(order_id)   ← watches the SMS inbox until the credit lands
+                                ← verified: delivers. Timed out: refuses and tells you.
+```
+
+Escalations raise a loud banner in the operator's terminal (plus `data/escalation-alert.txt`) instead of sending messages anywhere.
 
 ## Earning-agent guardrails 🛡️
 
@@ -227,19 +253,20 @@ Wired into the **agent loop itself**, not just the prompt:
 2. **No manipulation** — no fake engagement, spam, astroturfing, or misleading financial claims; these rules override every task.
 3. **Platform compliance** — `policy_check(platform)` before the first action on any platform; if automation is forbidden, the agent reports back instead of acting. *Seed entries ship unverified — confirm each platform's current terms yourself.*
 4. **Spending limits** — `wallet_send` hard-refuses anything above `OMNIUSE_WALLET_MAX_TX`, only pays above `OMNIUSE_AUTOPAY_MIN`, requires a stated purpose, logs everything, and additionally sits behind a **confirm** permission. The agent never holds private keys — signing is delegated to your `OMNIUSE_SEND_CMD`.
-5. **Human escalation** — anything requiring human legal identity (KYC, bank accounts, signatures) pauses the task and pings you on Telegram.
+5. **Human escalation** — anything requiring human legal identity (KYC, bank accounts, signatures) pauses the task and raises a loud banner in the operator's terminal (plus `data/escalation-alert.txt`).
 6. **Full audit trail** — `data/memory/log.jsonl` records every call, decision and payment.
-7. **Killswitch** — `/stop` halts everything instantly; checked before every tool call.
+7. **Killswitch** — `stop` halts everything instantly; checked before every tool call.
 
-### Operator console
+### Operator console (terminal + voice)
 
 ```bash
-python -m omniuse.operator            # Telegram daemon: /stop /resume /resolve /approve /revoke /status /orders /paid <id>
+python -m omniuse.operator            # interactive console: commands + free-text tasks
 python -m omniuse.operator stop       # one-shot CLI
 python -m omniuse.operator approve wallet_send
 python -m omniuse.operator status
 python -m omniuse.operator orders      # shop orders
 python -m omniuse.operator paid ord-1234-abc
+python -m omniuse.voice listen         # speak — it hears and runs it
 ```
 
 ## Phone setup (mobile toolset)
@@ -266,7 +293,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 | `OMNIUSE_PAYEE_NAME` | — | Name on payment requests & watermarks |
 | `OMNIUSE_WALLET_MAX_TX` | `0.01` | **Hard per-transaction payment cap** |
 | `OMNIUSE_SEND_CMD` | — | Command that actually signs/sends; empty = queue only |
-| `OMNIUSE_TELEGRAM_BOT_TOKEN` / `_CHAT_ID` | — | Operator alerts + commands |
+| `OMNIUSE_STT_MODEL` | `whisper-1` | Speech-to-text model for voice control |
 | `OMNIUSE_OPERATOR_TOKEN` | — | Secret needed to raise the spend limit |
 | `OMNIUSE_HUB_URL` / `_TOKEN` | — | Remote body connection |
 
@@ -277,7 +304,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 - Exposing the hub beyond localhost (`--host 0.0.0.0`) means anyone with the token can run tools on that machine — use a strong token and a firewall.
 - The scheduler runs missions **without a human watching** — keep daily budgets sane, read the mission reports, and keep the killswitch handy.
 - Crypto payments are irreversible — start with a tiny cap and test in queue-only mode (no `OMNIUSE_SEND_CMD`) first.
-- **Shop & outreach**: a payment screenshot can be faked — the agent will not deliver the clean file until a credit SMS lands on your phone (or you `/paid` it yourself). The agent researches prospects and drafts first-contact messages, but **you** send them from your own account — automated unsolicited messages are spam, and platforms ban for it. One message per prospect; never again to non-responders or decliners.
+- **Shop & outreach**: a payment screenshot can be faked — the agent will not deliver the clean file until a credit SMS lands on your phone (or you `paid <order_id>` it yourself in the console). The agent researches prospects and drafts first-contact messages, but **you** send them from your own account — automated unsolicited messages are spam, and platforms ban for it. One message per prospect; never again to non-responders or decliners.
 - "Earning" online still means following platform terms and the law. The guardrails exist so the agent stays on the right side of both; don't disable them.
 - Read the memory log regularly — that's what it's for.
 
