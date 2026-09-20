@@ -242,6 +242,37 @@ def payment_check_sms(minutes: int = 120, mark_paid: bool = True) -> str:
             "Check payment_check_sms window or the order price.")
 
 
+def payment_wait(order_id: str, timeout_minutes: int = 15, poll_seconds: int = 20) -> str:
+    """Wait for a specific order's payment to land: keeps checking the
+    operator's SMS inbox (and order state) until it's verified or time runs
+    out. Use right after a client says they've paid."""
+    order = _find(order_id)
+    if not order:
+        return f"ERROR: no order '{order_id}'."
+    if order["state"] == "paid":
+        return f"Order {order_id} is ALREADY paid — you may deliver the final file now."
+    if order["state"] in ("delivered",):
+        return f"Order {order_id} is already delivered."
+    deadline = time.time() + max(1, int(timeout_minutes)) * 60
+    poll = max(5, int(poll_seconds))
+    waited = 0
+    while time.time() < deadline:
+        payment_check_sms(minutes=max(2, int(timeout_minutes) + 2))
+        current = _find(order_id)
+        if current and current["state"] == "paid":
+            return (f"PAYMENT VERIFIED for {order_id} after ~{waited}s of waiting — "
+                    "the credit SMS arrived. You may now deliver the final file "
+                    f"({current['final']}).")
+        time.sleep(poll)
+        waited += poll
+        if waited % (poll * 3) == 0:
+            print(f"[payment_wait] {order_id}: {waited}s elapsed, still waiting for the credit SMS...")
+    return (f"TIMED OUT after {timeout_minutes} minutes: no credit SMS matched {order_id} "
+            f"(₹{order['price']:.2f}). Do NOT deliver. The operator can still confirm "
+            "manually (order_mark_paid with their token / `python -m omniuse.operator paid "
+            f"{order_id}`), or ask the client to double-check the payment.")
+
+
 TOOLS = {
     "order_create": (order_create, {
         "type": "function",
@@ -366,6 +397,26 @@ TOOLS = {
                     "minutes": {"type": "integer", "description": "How far back to look (default 120)"},
                     "mark_paid": {"type": "boolean", "description": "Auto-mark matching orders paid (default true)"},
                 },
+            },
+        },
+    }),
+    "payment_wait": (payment_wait, {
+        "type": "function",
+        "function": {
+            "name": "payment_wait",
+            "description": (
+                "Wait for a specific order's payment to land — keeps checking the operator's "
+                "SMS inbox until the order turns 'paid' or the timeout hits. Use right after "
+                "a client says they've paid, instead of asking them for a screenshot first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {"type": "string"},
+                    "timeout_minutes": {"type": "integer", "description": "How long to wait (default 15)"},
+                    "poll_seconds": {"type": "integer", "description": "Check interval (default 20)"},
+                },
+                "required": ["order_id"],
             },
         },
     }),
