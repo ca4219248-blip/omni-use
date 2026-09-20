@@ -32,42 +32,15 @@ def _esc(text: str) -> str:
 def _latin(text: str) -> str:
     """Transliterate to latin-1 for the standard PDF fonts (₹ → Rs.)."""
     replacements = {"₹": "Rs.", "—": "-", "–": "-", "…": "...", "’": "'",
-                   "‘": "'", "“": '"', "”": '"', "✓": "OK", "→": "->"}
+                     "‘": "'", "“": '"', "”": '"', "✓": "OK", "→": "->"}
     for k, v in replacements.items():
         text = text.replace(k, v)
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
-# Helvetica AFM widths for the 95 printable ASCII chars (per 1000 units).
-_WIDTHS = {}
-def _load_widths():
-    base = (" 278,!278,\"355,#556,$556,%889,&667,'191,(333,)333,*389,+584,"
-            ",278,-333,.278,/278")
-    common = (":278,;278,<584,=584,>584,?556,@1015,A667,B667,C722,D722,E667,"
-              "F611,G778,H722,I278,J500,K667,L556,M833,N722,O778,P667,Q778,"
-              "R722,S667,T611,U722,V667,W944,X667,Y667,Z611,[278,\\278,]278,"
-              "^469,_556,`333,a556,b556,c500,d556,e556,f278,g556,h556,i222,"
-              "j222,j500,k500,l222,m833,n556,o556,p556,q556,r333,s500,t278,"
-              "u556,v500,w722,x500,y500,z500,{334,|260,}334,~584")
-    reg = {}
-    for pair in base.split(","):
-        if pair:
-            reg[pair[0]] = int(pair[1:])
-    for ch in "0123456789":
-        reg[ch] = 556
-    for pair in common.split(","):
-        if pair:
-            reg[pair[0]] = int(pair[1:])
-    bold = {c: int(w * 1.08) for c, w in reg.items()}   # approx for wrap
-    _WIDTHS.update({"F1": reg, "F2": bold})
-
-
-_load_widths()
-
-
 def _wrap(text: str, font: str, size: float, width: float) -> list[str]:
-    """Greedy word-wrap using the Helvetica width table."""
-    widths = _WIDTHS.get(font, _WIDTHS["F1"])
+    """Greedy word-wrap using the Helvetica width table (approx. per char)."""
+    widths = _HELV_W.get(font, _HELV_W["F1"])
     def text_w(s: str) -> float:
         return sum(widths.get(c, size * 0.55) for c in s) / 1000 * size
     words, lines, cur = text.split(), [], ""
@@ -81,6 +54,34 @@ def _wrap(text: str, font: str, size: float, width: float) -> list[str]:
     if cur:
         lines.append(cur)
     return lines or [""]
+
+
+# Helvetica AFM widths for the 95 printable ASCII chars (per 1000 units).
+_HELV_W = {}
+_EVEN = {"F1": {}, "F2": {}}
+def _load_widths():
+    base = (" 278,!278,\"355,#556,$556,%889,&667,'191,(333,)333,*389,+584,"
+            ",278,-333,.278,/278")
+    digits = "556"
+    common = (":278,;278,<584,=584,>584,?556,@1015,A667,B667,C722,D722,E667,"
+              "F611,G778,H722,I278,J500,K667,L556,M833,N722,O778,P667,Q778,"
+              "R722,S667,T611,U722,V667,W944,X667,Y667,Z611,[278,\\278,]278,"
+              "^469,_556,`333,a556,b556,c500,d556,e556,f278,g556,h556,i222,"
+              "j222,j500,k500,l222,m833,n556,o556,p556,q556,r333,s500,t278,"
+              "u556,v500,w722,x500,y500,z500,{334,|260,}334,~584")
+    for pair in base.split(","):
+        if pair:
+            _EVEN["F1"][pair[0]] = int(pair[1:])
+    for ch in "0123456789":
+        _EVEN["F1"][ch] = 556
+    for pair in common.split(","):
+        if pair:
+            _EVEN["F1"][pair[0]] = int(pair[1:])
+    # bold: approximate by scaling regular widths ~1.08x (good enough for wrap)
+    _EVEN["F2"] = {c: int(w * 1.08) for c, w in _EVEN["F1"].items()}
+    _HELV_W.update(_EVEN)
+
+_load_widths()
 
 
 class _PDFBuilder:
@@ -116,7 +117,11 @@ class _PDFBuilder:
         self.line(f"•  {text}", "F1", _BULLET, 2)
 
     def build(self) -> bytes:
-        page_objs = list(self.pages)
+        page_objs = []
+        for page in self.pages:
+            content = "\n".join(page)
+            page_objs.append(content)
+        # object numbering: 1=catalog 2=pages 3=F1 4=F2, then pages, then contents
         n_pages = len(page_objs)
         objs = ["", ""]
         objs[0] = "<< /Type /Catalog /Pages 2 0 R >>"
