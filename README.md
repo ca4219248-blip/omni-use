@@ -6,7 +6,7 @@
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 4.0                   │
+                 │                    OmniUse 4.1                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -20,6 +20,7 @@
                💡 Ideas     🤝 Prospects   🎙 Voice
                📝 Text      📁 Files      🖼 Media
                📊 CSV       🗒 Notes      🔳 QR
+               🗣 Speech
 ```
 
 ## What it gives your AI
@@ -27,14 +28,14 @@
 | Toolset | What the agent can do |
 |---|---|
 | **browser** | Open pages, click, type, scroll, read text & links, screenshots, tabs, wait-for, JS eval; persistent profile so logins survive (Playwright) |
-| **mobile** | Tap, swipe, type, press keys, screenshots, `adb shell` on Android |
-| **system** | Run shell commands, read/write/list files |
+| **mobile** | Tap, swipe, type, press keys, screenshots, `adb shell` on Android; **mobile_connect** pairs over WiFi (wireless ADB) — no USB cable, works from Termux too |
+| **system** | Run shell commands, read/write/list files; optionally locked down with `OMNIUSE_SYSTEM_ALLOWLIST` (a poor man's Docker — only allowlisted commands run) |
 | **vision** | *Look at* any screenshot it takes |
-| **screen** | Read a screen as **structured elements** (buttons, inputs, menus) — browser DOM or Android UI tree; `find_element('Start Race')` beats guessing coordinates |
+| **screen** | Read a screen as **structured elements** (buttons, inputs, menus) — browser DOM or Android UI tree; and **Set-of-Marks** (`screen_marks`): a screenshot with numbered boxes on every clickable element, so the model clicks "element #7" instead of guessing pixels |
 | **universal** | One API for every device: `click('Start Race')`, `type_text(...)`, `scroll`, `open_target(...)`, `drag(...)` — OmniUse decides if that means the browser or the phone |
 | **remote** | Run tools on distant machines via **OmniUse Hub** — the AI's remote body (named hub registry) |
 | **team** | `spawn_worker()` — delegate sub-tasks to fresh worker agents; the planner keeps the big picture |
-| **memory** | Append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) so "mera GitHub username yaad rakhna" actually works across runs; remembered facts are injected into every task |
+| **memory** | Append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) so "mera GitHub username yaad rakhna" actually works across runs; remembered facts AND the last few completed runs are injected into every task — the agent knows what it already did |
 | **missions** | Autonomous multi-step goals: work → checkpoint → repeat, with a full report per mission (`data/missions/<id>-report.md`) |
 | **scheduler** | Run missions on autopilot (`python -m omniuse.scheduler daemon`) — refuses to run while the killswitch is engaged |
 | **budget** | Daily step/tool-call caps (`OMNIUSE_DAILY_STEPS` / `_TOOL_CALLS`) — the agent winds down gracefully instead of burning money all night |
@@ -53,6 +54,7 @@
 | **csvdata** | CSV summaries (types, uniques, min/max/mean), aligned head, row filters (equals/contains/gt/…), column select, merge with dedupe, CSV→JSON — stdlib only |
 | **notes** | A searchable personal notebook: add/list/search/delete notes with tags (JSONL storage) |
 | **qr** | QR codes for any text, URL, WiFi credentials and vCard contacts (the UPI payment QR lives in payments) |
+| **speech** | `voice_speak()` — the agent talks back out loud (text-to-speech, any OpenAI-compatible endpoint; saves an mp3 even with no player installed) |
 
 The agent works with **any OpenAI-compatible LLM** — OpenAI, Groq, OpenRouter, Together, or a local Ollama/vLLM server.
 
@@ -103,7 +105,15 @@ omniuse> paid ord-1234-abc                 ← YOU confirming the money arrived
 omniuse> stop / resume / resolve / approve <tool> / revoke / status
 ```
 
-Voice needs `OMNIUSE_STT_MODEL` (default `whisper-1`) on any OpenAI-compatible provider; mic recording additionally needs `pip install sounddevice numpy scipy`. Console commands route to the operator tools; everything else runs as a full agent task.
+Voice needs `OMNIUSE_STT_MODEL` (default `whisper-1`) on any OpenAI-compatible provider; mic recording additionally needs `pip install sounddevice numpy scipy`. Console commands route to the operator tools; everything else runs as a full agent task. And the agent can **talk back**: `voice_speak()` (text-to-speech) says short confirmations out loud and always saves the mp3.
+
+## Reliability & speed 🎯
+
+- **Structure beats pixels**: `screen_elements()` reads the DOM / UI tree, `screen_marks()` draws numbered boxes on a screenshot (Set-of-Marks) — the model acts on "element #7", not guessed coordinates.
+- **Stuck detection**: the same tool call 3 times in a row triggers a replan warning; a 4th stops the task. No infinite loops, no burning the budget on a wall.
+- **Self-correction**: after repeated failures the loop injects an explicit "stop guessing, observe, rethink" nudge.
+- **Cheap/fast routing**: set `OMNIUSE_FAST_MODEL` (e.g. a Groq-hosted llama) for routine turns and keep `OMNIUSE_MODEL` for planning and vision.
+- **Memory carries over**: remembered facts + the last few completed runs are injected into every new task — the agent doesn't redo finished work.
 
 ## Paid work: any skill, preview-first 🎨
 
@@ -165,6 +175,7 @@ Wired into the **agent loop itself**, checked before every tool call — not jus
 7. **Full audit trail** — `data/memory/log.jsonl` records every call, decision and payment.
 8. **Killswitch** — `stop` halts everything instantly; checked before every tool call.
 9. **Daily budget** — step/tool-call caps wind the agent down instead of running all night.
+10. **Shell allowlist (optional)** — set `OMNIUSE_SYSTEM_ALLOWLIST` and `system_run` refuses anything not matching — a sandbox without Docker.
 
 ## Autonomy: missions, scheduler, team 🚀
 
@@ -180,6 +191,11 @@ Wired into the **agent loop itself**, checked before every tool call — not jus
 3. Plug in via USB, run `adb devices`, accept the prompt.
 4. `screen_elements(device='mobile')` and `click('Some button')` now work on the phone. SMS read permission additionally enables `payment_check_sms`/`payment_wait`.
 
+**No cable? Wireless (Termux-friendly):**
+
+- **Same WiFi, phone option**: Developer options → **Wireless debugging** → enable, note the ip:port, then `mobile_connect("192.168.x.x:port")` (run `adb pair` once if it asks).
+- **From the phone itself (Termux)**: `pkg install adb`, then run the hub or adb inside Termux — control your phone with your phone. No USB, no PC needed.
+
 ## Configuration
 
 All config is plain environment variables (see `.env.example`). The essentials:
@@ -189,13 +205,16 @@ All config is plain environment variables (see `.env.example`). The essentials:
 | `OPENAI_API_KEY` | — | Your LLM key (required) |
 | `OPENAI_BASE_URL` | OpenAI | Any OpenAI-compatible endpoint |
 | `OMNIUSE_MODEL` | `gpt-4o-mini` | Needs vision for the vision toolset |
+| `OMNIUSE_FAST_MODEL` | = `OMNIUSE_MODEL` | Cheap/fast model for routine turns |
 | `OMNIUSE_DATA_DIR` | `data` | Policies, memory, permissions, missions, orders |
 | `OMNIUSE_PLUGINS_DIR` | `plugins` | Drop-in plugin folder |
 | `OMNIUSE_PROFILE_DIR` | — | Persistent browser profile (logins survive) |
 | `OMNIUSE_DAILY_STEPS` / `_TOOL_CALLS` | `500` | Daily budget caps ("0" = unlimited) |
+| `OMNIUSE_SYSTEM_ALLOWLIST` | — (unrestricted) | fnmatch patterns for `system_run` (poor man's Docker) |
 | `OMNIUSE_UPI_VPA` | — | Your UPI ID (shop payments) |
 | `OMNIUSE_PAYEE_NAME` | — | Name on payment requests & watermarks |
 | `OMNIUSE_STT_MODEL` | `whisper-1` | Speech-to-text model for voice control |
+| `OMNIUSE_TTS_MODEL` / `_VOICE` | `tts-1` / `alloy` | Text-to-speech for `voice_speak` |
 | `OMNIUSE_OPERATOR_TOKEN` | — | Secret needed to raise the spend limit |
 | `OMNIUSE_WALLET_MAX_TX` | `0.01` | **Hard per-transaction payment cap** |
 | `OMNIUSE_SEND_CMD` | — | Command that actually signs/sends; empty = queue only |
@@ -203,7 +222,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 
 ## ⚠️ Use responsibly
 
-- The `system` toolset runs **real shell commands**; guardrails are brakes, not a sandbox — the agent has whatever permissions you have.
+- The `system` toolset runs **real shell commands**; guardrails are brakes, not a sandbox — set `OMNIUSE_SYSTEM_ALLOWLIST` if you want a hard command filter (the agent has whatever permissions you have).
 - Use the mobile toolset **only on your own device**.
 - Exposing the hub beyond localhost (`--host 0.0.0.0`) means anyone with the token can run tools on that machine — use a strong token and a firewall.
 - The scheduler runs missions **without a human watching** — keep daily budgets sane, read the mission reports, and keep the killswitch handy.
@@ -214,13 +233,11 @@ All config is plain environment variables (see `.env.example`). The essentials:
 
 ## Testing
 
-A pytest suite covers the registry, all six local toolsets, and the rules that must never break (paid-work pipeline, one-message rule, killswitch, escalation):
+A pytest suite (62 tests, stubbed LLM — no API key needed) covers the registry, the local toolsets, and the rules that must never break: paid-work pipeline, one-message rule, killswitch, escalation, stuck detection, allowlist, Set-of-Marks:
 
 ```bash
 python -m pytest tests/ -q
 ```
-
-All tests run with a stubbed LLM — no API key needed.
 
 ## Roadmap
 
@@ -228,6 +245,7 @@ All tests run with a stubbed LLM — no API key needed.
 - [ ] Canva Connect API plugin for the design toolset
 - [ ] Streaming CLI with live step display
 - [ ] Docker sandbox for the `system` toolset
+- [ ] Vector search over the memory log
 
 ## License
 
