@@ -11,16 +11,20 @@ Wired into the loop itself (not just the prompt):
                  interactive, otherwise the task pauses until approved).
   - budget:      daily step/tool-call caps; exceeding them winds the agent
                  down gracefully instead of burning money all night.
-  - memory:      every tool call is auto-logged, and remembered facts
-                 (memory_save) are injected into every task's context.
+  - memory:      every tool call is auto-logged, remembered facts and the
+                 last few completed runs are injected into every task's
+                 context, so the agent knows what it already did.
   - self-correction: after repeated failures the agent gets an explicit
                  nudge to stop guessing, observe the real screen, and rethink.
+  - stuck detection: the exact same tool call 3 times in a row gets a
+                 replan warning; a 4th stops the task — no infinite loops.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+import time
 import traceback
 
 from omniuse import budget as _budget
@@ -32,7 +36,7 @@ from omniuse.tools import memory as _memory
 from omniuse.tools import get_tool_schemas, run_tool
 
 SYSTEM_PROMPT = """\
-You are OmniUse 3.3, an AI agent with hands and eyes — running under operator supervision.
+You are OmniUse 4.1, an AI agent with hands and eyes — running under operator supervision.
 
 You can control:
 - A real web browser (Playwright/Chromium; optional persistent profile so logins survive):
@@ -120,7 +124,9 @@ How to work:
    truth — after browser_screenshot / mobile_screenshot, ALWAYS use look_at_image
    to check what happened.
 3. Prefer structure over guessing: screen_elements() / find_element() / browser_text()
-   / browser_links() beat blind coordinates; click('button text') beats tap(x, y).
+   / browser_links() beat blind coordinates; screen_marks() gives you a screenshot
+   with NUMBERED boxes on every clickable element — look at it and act by number;
+   click('button text') beats tap(x, y).
 4. SELF-CORRECT: if an action fails, do not just retry it blindly. Observe what
    actually changed (screenshot, screen_elements, re-read the error), rethink,
    then try a different approach and VERIFY the result.
@@ -150,6 +156,17 @@ _RETHINK_NUDGE = (
 
 _FACTS_HEADER = "\n\nREMEMBERED FACTS (persistent memory — use these, don't re-ask the user):\n"
 
+_RUNS_HEADER = "\n\nRECENT RUNS (what you were asked and concluded lately — don't redo finished work, build on it):\n"
+
+def _runs_block() -> str:
+    runs = _memory.recent_runs(3)
+    if not runs:
+        return ""
+    lines = []
+    for r in runs:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(r.get("when", 0)))
+        lines.append(f"- [{when}] task: {r.get('task', '')} → result: {r.get('answer', '')}")
+    return _RUNS_HEADER + "\n".join(lines)
 
 def _facts_block() -> str:
     facts = _memory.snapshot()
@@ -201,7 +218,7 @@ class Agent:
             return False, (f"TASK PAUSED: tool '{name}' requires operator confirmation. "
                            f"Approve it on this machine with "
                            f"`python -m omniuse.operator approve {name}` "
-                           "(or `approve {name}` in the console), then run the task again.")
+                           f"(or `approve {name}` in the console), then run the task again.")
         return True, None
 
     # --------------------------------------------------------------- run
@@ -213,11 +230,13 @@ class Agent:
             raise ValueError("No tools enabled — check the `toolsets` argument.")
 
         messages: list[dict] = [
-            {"role": "system", "content": SYSTEM_PROMPT + _facts_block()},
+            {"role": "system", "content": SYSTEM_PROMPT + _facts_block() + _runs_block()},
             {"role": "user", "content": task},
         ]
         final_answer = "Agent stopped without a final answer."
         consecutive_errors = 0
+        last_signature = None
+        same_action = 0
         _memory.log_event("task_start", task=task, toolsets=self.toolsets)
 
         for step in range(1, self.max_steps + 1):
@@ -260,12 +279,38 @@ class Agent:
                     return paused
                 # ------------------------------------------------------
 
+                # ---- stuck detection: the exact same action, over and over ----
                 try:
                     arguments = json.loads(call["function"]["arguments"] or "{}")
                 except json.JSONDecodeError as e:
                     arguments = {}
                     result = f"ERROR: your arguments were not valid JSON ({e})."
                 else:
+                    signature = (name, json.dumps(arguments, sort_keys=True))
+                    if signature == last_signature:
+                        same_action += 1
+                    else:
+                        last_signature = signature
+                        same_action = 1
+                    if same_action >= 4:
+                        stuck = ("TASK STOPPED: the agent repeated the exact same action "
+                                 f"({pretty_tool_call(name, arguments)}) {same_action} times "
+                                 "in a row. This looks like a loop — replan from scratch, "
+                                 "observe the screen first, and try a genuinely different "
+                                 "approach.")
+                        self.log(f"\n🌀 {stuck}")
+                        _memory.log_event("stuck_stop", tool=name, step=step)
+                        return stuck
+                    if same_action == 3:
+                        result = ("REFUSED: you have called this exact tool with these exact "
+                                  "arguments 3 times in a row. The action is clearly not "
+                                  "working — observe (screenshot / screen_elements / re-read "
+                                  "the error), then plan a DIFFERENT action. Repeating it a "
+                                  "4th time will stop the task.")
+                        messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+                        _memory.log_event("stuck_nudge", tool=name, step=step)
+                        continue
+
                     allowed, gate_result = self._gate(name, arguments)
                     if not allowed:
                         if gate_result and gate_result.startswith("TASK PAUSED"):
