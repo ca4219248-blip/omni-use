@@ -1,12 +1,12 @@
 # OmniUse 🤖
 
-**An AI agent that can actually *use* things** — your browser, your Android phone, your computer, remote machines, a paid-work shop (any skill — not just design), and (with guardrails) your wallet. You talk to it by typing or just speaking; it plans, acts, observes, self-corrects, and reports back.
+**An AI agent that can actually *use* things** — your browser, your Android phone, your computer, remote machines, a paid-work shop (any skill — not just design), and (with guardrails) your wallet. You talk to it by typing or just speaking; it plans, acts, observes, self-corrects, learns, and reports back.
 
-> Hinglish mein: *Ek AI agent jo aapke browser, phone, computer aur remote machines ko khud use kar sakta hai.* Task bolo — "phone ki notifications padho", "mujhe ₹300 chahiye" — agent khud plan banayega, click karega, verify karega, aur kaam karke report dega.
+> Hinglish mein: *Ek AI agent jo aapke browser, phone, computer aur remote machines ko khud use kar sakta hai.* Task bolo — "phone ki notifications padho", "mujhe ₹300 chahiye", "is UPI pe mat le, naya QR deta hun" — agent khud plan banayega, click karega, verify karega, seekhega, aur kaam karke report dega.
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 5.0                   │
+                 │                    OmniUse 5.1                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -20,7 +20,7 @@
                💡 Ideas     🤝 Prospects   🎙 Voice
                📝 Text      📁 Files      🖼 Media
                📊 CSV       🗒 Notes      🔳 QR
-               🗣 Speech    📄 Reports
+               🗣 Speech    📄 Reports  ⚙️ Settings
 ```
 
 ## What it gives your AI
@@ -37,6 +37,7 @@
 | **team** | `spawn_worker()` — delegate sub-tasks to fresh worker agents; the planner keeps the big picture |
 | **memory** | Append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) + **lessons learned** (`lesson_save`) — facts, recent runs AND lessons are injected into every task |
 | **reports** | `task_report()` — full PDF reports of finished tasks (pure-stdlib PDF writer, no extra dependency); missions auto-generate one |
+| **settings** | **Runtime knowledge**: "is UPI pe mat le, naya QR deta hun" → the agent finds the file (`files_recent`), *looks* at it (`upi_read_qr`/vision), adopts the new UPI ID (`setting_set`) — live, no .env, no restart. Only receiving-side keys are changeable; money caps stay locked in .env |
 | **missions** | Autonomous multi-step goals: work → checkpoint → repeat, with a full report per mission (`data/missions/<id>-report.md`) |
 | **scheduler** | Run missions on autopilot (`python -m omniuse.scheduler daemon`) — refuses to run while the killswitch is engaged |
 | **budget** | Daily step/tool-call caps (`OMNIUSE_DAILY_STEPS` / `_TOOL_CALLS`) — the agent winds down gracefully instead of burning money all night |
@@ -50,7 +51,7 @@
 | **shop** | Catalog for ANY service, proposals for inbound clients, listing drafts for your own page, **work_preview** for text deliverables, prospect tracking + outreach drafts (operator-sent, one-message rule) |
 | **ideas** | `idea_save`/`idea_list`/`idea_update` — a self-starter: when you have no idea, the agent brainstorms, scores and picks one itself |
 | **text** | Wordcounts, case, replace, regex extract, slugify, diff, head — plus LLM-powered `text_summarize` and `text_translate` |
-| **files** | Read/write/append, tree listing, glob find, folder-size breakdown, Downloads-style `files_organize` (dry-run first), sha256 duplicate finder, zip backups |
+| **files** | Read/write/append, tree listing, glob find, **files_recent** (newest-first — "gallery mein dekh lo"), folder-size breakdown, Downloads-style `files_organize` (dry-run first), sha256 duplicate finder, zip backups |
 | **media** | Resize (exact/% /ratio), crop, convert (png/jpg/webp/…), compress, contact-sheet thumbnail grids — pure Pillow, no API |
 | **csvdata** | CSV summaries (types, uniques, min/max/mean), aligned head, row filters (equals/contains/gt/…), column select, merge with dedupe, CSV→JSON — stdlib only |
 | **notes** | A searchable personal notebook: add/list/search/delete notes with tags (JSONL storage) |
@@ -74,6 +75,8 @@ python cli.py "Open news.ycombinator.com and give me the top 3 story titles"
 
 python cli.py --tools browser,screen,universal,vision \
   "Open youtube.com, search for lofi beats, and report the top 3 video titles"
+
+python cli.py --tools auto "any task — the router picks the toolsets"
 
 python cli.py --mission "Run this project's tests, fix any bugs you find, and report what you did"
 ```
@@ -101,6 +104,7 @@ python -m omniuse.voice file v.wav  # a saved voice note
 
 ```
 omniuse> bhai mujhe 300 rupay chahiye      ← typed or spoken → agent task
+omniuse> is UPI pe mat le, naya QR deta hun ← agent: files_recent → upi_read_qr → live
 omniuse> orders                            ← shop orders + states
 omniuse> paid ord-1234-abc                 ← YOU confirming the money arrived
 omniuse> stop / resume / resolve / approve <tool> / revoke / status
@@ -126,6 +130,20 @@ The agent gets better with every task, three ways:
 - **Lessons** — after any real failure the agent calls `lesson_save(mistake, lesson)`; the last 10 lessons are injected into every future task, so the same mistake is never repeated.
 - **PDF reports** — `task_report()` writes a full PDF report (what was done, how, what failed, what was learned) to `data/reports/`; missions auto-generate one next to their markdown report.
 - **`improve`** — the operator command reviews the agent's recent runs, errors and lessons, writes `data/improvement-plan.md`; `improve apply` appends its behaviour rules to `data/agent-profile.md`, which is injected into every future task. Tony-Stark-style: it reviews its own work, you approve the fix, it flies better.
+
+## Runtime knowledge: conversation beats config ⚙️
+
+`.env` is only the **first-time bootstrap**. After that, live details change in conversation and the agent adopts them like a human would:
+
+```
+you:    "is UPI pe mat le, naya QR deta hun — gallery mein pada hai"
+agent:  files_recent("*.png")          → sees what landed recently
+        upi_read_qr("IMG_2091.png")    → LOOKS at the QR, pulls the UPI ID out of it
+        setting_set("upi_vpa", ...)   → live from the next tool call, no .env, no restart
+        memory_save(...)              → remembers it for future runs too
+```
+
+If the QR doesn't print the ID, the agent just asks you to say it — and `setting_set`s that. Guardrail: only receiving-side / harmless keys (UPI ID, payee name, voice) are runtime-changeable; money caps and the operator token are deliberately locked to .env — the agent can never talk its way around those.
 
 ## Paid work: any skill, preview-first 🎨
 
@@ -210,7 +228,7 @@ Wired into the **agent loop itself**, checked before every tool call — not jus
 
 ## Configuration
 
-All config is plain environment variables (see `.env.example`). The essentials:
+All config is plain environment variables (see `.env.example`) — **that's just the first-time bootstrap**. After that the operator changes live details in conversation (new UPI QR, payee name, voice) and the agent adopts them via the settings toolset — `data/runtime.json` overrides the env, effective on the next tool call. Money caps and the operator token are deliberately NOT runtime-changeable. The essentials:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -223,12 +241,12 @@ All config is plain environment variables (see `.env.example`). The essentials:
 | `OMNIUSE_PROFILE_DIR` | — | Persistent browser profile (logins survive) |
 | `OMNIUSE_DAILY_STEPS` / `_TOOL_CALLS` | `500` | Daily budget caps ("0" = unlimited) |
 | `OMNIUSE_SYSTEM_ALLOWLIST` | — (unrestricted) | fnmatch patterns for `system_run` (poor man's Docker) |
-| `OMNIUSE_UPI_VPA` | — | Your UPI ID (shop payments) |
-| `OMNIUSE_PAYEE_NAME` | — | Name on payment requests & watermarks |
+| `OMNIUSE_UPI_VPA` | — | Your UPI ID (shop payments; changeable live in conversation) |
+| `OMNIUSE_PAYEE_NAME` | — | Name on payment requests & watermarks (changeable live) |
 | `OMNIUSE_STT_MODEL` | `whisper-1` | Speech-to-text model for voice control |
 | `OMNIUSE_TTS_MODEL` / `_VOICE` | `tts-1` / `alloy` | Text-to-speech for `voice_speak` |
-| `OMNIUSE_OPERATOR_TOKEN` | — | Secret needed to raise the spend limit |
-| `OMNIUSE_WALLET_MAX_TX` | `0.01` | **Hard per-transaction payment cap** |
+| `OMNIUSE_OPERATOR_TOKEN` | — | Secret needed to raise the spend limit (NOT runtime-changeable) |
+| `OMNIUSE_WALLET_MAX_TX` | `0.01` | **Hard per-transaction payment cap** (NOT runtime-changeable) |
 | `OMNIUSE_SEND_CMD` | — | Command that actually signs/sends; empty = queue only |
 | `OMNIUSE_HUB_URL` / `_TOKEN` | — | Remote body connection |
 
@@ -245,7 +263,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 
 ## Testing
 
-A pytest suite (78 tests, stubbed LLM — no API key needed) covers the registry, the local toolsets, and the rules that must never break: paid-work pipeline, one-message rule, killswitch, escalation, stuck detection, allowlist, Set-of-Marks, PDF reports, lessons, auto-router:
+A pytest suite (87 tests, stubbed LLM — no API key needed) covers the registry, the local toolsets, and the rules that must never break: paid-work pipeline, one-message rule, killswitch, escalation, stuck detection, allowlist, Set-of-Marks, PDF reports, lessons, auto-router, runtime settings/QR adoption:
 
 ```bash
 python -m pytest tests/ -q
