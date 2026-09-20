@@ -8,7 +8,7 @@ skill (not just design) with preview-first selling and verified UPI payments.
 A big local toolbox: text, files, media, CSV, notes and QR toolsets.
 """
 
-__version__ = "4.1.0"
+__version__ = "5.0.0"
 
 __all__ = ["Agent", "Mission", "__version__"]
 

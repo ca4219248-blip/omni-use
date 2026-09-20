@@ -14,7 +14,7 @@ import json
 from omniuse import config
 from omniuse.tools import browser, escalate, killswitch, memory, mobile, policy, system, team, vision, wallet
 from omniuse.tools import design, ideas, payments, remote, screen, shop, universal
-from omniuse.tools import text, files, media, csvdata, notes, qr, speech
+from omniuse.tools import text, files, media, csvdata, notes, qr, speech, reports
 
 TOOLSETS: dict[str, dict] = {
     "browser": browser.TOOLS,
@@ -41,6 +41,7 @@ TOOLSETS: dict[str, dict] = {
     "notes": notes.TOOLS,
     "qr": qr.TOOLS,
     "speech": speech.TOOLS,
+    "reports": reports.TOOLS,
 }
 
 # ---- plugins (loaded from plugins/ — see omniuse/plugins/__init__.py) ----

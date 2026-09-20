@@ -134,4 +134,19 @@ class Mission:
                   f"## Iterations\n{iterations}\n\n## Final answer\n{answer}\n")
         report_path.write_text(report, encoding="utf-8")
         _memory.log_event("mission_end", mission=self.id, status=state["status"])
-        return f"MISSION {state['status'].upper()} — full report: {report_path}\n\n{answer}"
+        extra = ""
+        try:  # a PDF copy for the operator — never let it break the mission
+            from omniuse.tools import reports as _reports
+            sections = [
+                {"title": "Goal", "body": self.goal},
+                {"title": "Status", "body": str(state["status"])},
+                {"title": "Iterations", "body": iterations},
+                {"title": "Final answer", "body": answer},
+                {"bullets": [f"mission id: {self.id}",
+                             f"report (markdown): {report_path}"]},
+            ]
+            pdf_path = _reports._report_pdf(f"Mission report — {self.goal}", sections)
+            extra = f"\n📄 PDF report: {pdf_path}"
+        except Exception:  # noqa: BLE001
+            pass
+        return f"MISSION {state['status'].upper()} — full report: {report_path}{extra}\n\n{answer}"
