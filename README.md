@@ -6,7 +6,7 @@
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 4.1                   │
+                 │                    OmniUse 5.0                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -20,7 +20,7 @@
                💡 Ideas     🤝 Prospects   🎙 Voice
                📝 Text      📁 Files      🖼 Media
                📊 CSV       🗒 Notes      🔳 QR
-               🗣 Speech
+               🗣 Speech    📄 Reports
 ```
 
 ## What it gives your AI
@@ -35,7 +35,8 @@
 | **universal** | One API for every device: `click('Start Race')`, `type_text(...)`, `scroll`, `open_target(...)`, `drag(...)` — OmniUse decides if that means the browser or the phone |
 | **remote** | Run tools on distant machines via **OmniUse Hub** — the AI's remote body (named hub registry) |
 | **team** | `spawn_worker()` — delegate sub-tasks to fresh worker agents; the planner keeps the big picture |
-| **memory** | Append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) so "mera GitHub username yaad rakhna" actually works across runs; remembered facts AND the last few completed runs are injected into every task — the agent knows what it already did |
+| **memory** | Append-only event log (every tool call auto-logged) + a fact store (`memory_save`/`memory_get`) + **lessons learned** (`lesson_save`) — facts, recent runs AND lessons are injected into every task |
+| **reports** | `task_report()` — full PDF reports of finished tasks (pure-stdlib PDF writer, no extra dependency); missions auto-generate one |
 | **missions** | Autonomous multi-step goals: work → checkpoint → repeat, with a full report per mission (`data/missions/<id>-report.md`) |
 | **scheduler** | Run missions on autopilot (`python -m omniuse.scheduler daemon`) — refuses to run while the killswitch is engaged |
 | **budget** | Daily step/tool-call caps (`OMNIUSE_DAILY_STEPS` / `_TOOL_CALLS`) — the agent winds down gracefully instead of burning money all night |
@@ -103,6 +104,8 @@ omniuse> bhai mujhe 300 rupay chahiye      ← typed or spoken → agent task
 omniuse> orders                            ← shop orders + states
 omniuse> paid ord-1234-abc                 ← YOU confirming the money arrived
 omniuse> stop / resume / resolve / approve <tool> / revoke / status
+omniuse> improve            ← agent reviews its own history → improvement plan
+omniuse> improve apply      ← you approve → behaviour rules go live
 ```
 
 Voice needs `OMNIUSE_STT_MODEL` (default `whisper-1`) on any OpenAI-compatible provider; mic recording additionally needs `pip install sounddevice numpy scipy`. Console commands route to the operator tools; everything else runs as a full agent task. And the agent can **talk back**: `voice_speak()` (text-to-speech) says short confirmations out loud and always saves the mp3.
@@ -113,7 +116,16 @@ Voice needs `OMNIUSE_STT_MODEL` (default `whisper-1`) on any OpenAI-compatible p
 - **Stuck detection**: the same tool call 3 times in a row triggers a replan warning; a 4th stops the task. No infinite loops, no burning the budget on a wall.
 - **Self-correction**: after repeated failures the loop injects an explicit "stop guessing, observe, rethink" nudge.
 - **Cheap/fast routing**: set `OMNIUSE_FAST_MODEL` (e.g. a Groq-hosted llama) for routine turns and keep `OMNIUSE_MODEL` for planning and vision.
+- **Auto-router**: `--tools auto` (or `Agent(toolsets="auto")`) — one cheap fast-model call reads the task and picks only the toolsets it needs, so the LLM sees a short menu instead of all 100+ tools. Falls back to keyword matching if the LLM is unreachable — it never blocks a task.
 - **Memory carries over**: remembered facts + the last few completed runs are injected into every new task — the agent doesn't redo finished work.
+
+## Learning & self-improvement 🧪
+
+The agent gets better with every task, three ways:
+
+- **Lessons** — after any real failure the agent calls `lesson_save(mistake, lesson)`; the last 10 lessons are injected into every future task, so the same mistake is never repeated.
+- **PDF reports** — `task_report()` writes a full PDF report (what was done, how, what failed, what was learned) to `data/reports/`; missions auto-generate one next to their markdown report.
+- **`improve`** — the operator command reviews the agent's recent runs, errors and lessons, writes `data/improvement-plan.md`; `improve apply` appends its behaviour rules to `data/agent-profile.md`, which is injected into every future task. Tony-Stark-style: it reviews its own work, you approve the fix, it flies better.
 
 ## Paid work: any skill, preview-first 🎨
 
@@ -233,7 +245,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 
 ## Testing
 
-A pytest suite (62 tests, stubbed LLM — no API key needed) covers the registry, the local toolsets, and the rules that must never break: paid-work pipeline, one-message rule, killswitch, escalation, stuck detection, allowlist, Set-of-Marks:
+A pytest suite (78 tests, stubbed LLM — no API key needed) covers the registry, the local toolsets, and the rules that must never break: paid-work pipeline, one-message rule, killswitch, escalation, stuck detection, allowlist, Set-of-Marks, PDF reports, lessons, auto-router:
 
 ```bash
 python -m pytest tests/ -q
