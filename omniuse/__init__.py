@@ -7,10 +7,11 @@ memory, permissions, budgets, and a killswitch. A paid-work pipeline for ANY
 skill (not just design) with preview-first selling and verified UPI payments.
 A big local toolbox: text, files, media, CSV, notes and QR toolsets. Learns
 from every task (lessons), reports as PDF, and improves itself with the
-operator's approval.
+operator's approval. Runtime knowledge: live details (UPI QR etc.) are
+adopted in conversation — .env is just the first-time bootstrap.
 """
 
-__version__ = "5.0.0"
+__version__ = "5.1.0"
 
 __all__ = ["Agent", "Mission", "__version__"]
 

@@ -1,14 +1,33 @@
-"""Central configuration — everything comes from environment variables.
+"""Central configuration — environment variables FIRST, runtime overrides SECOND.
 
 Copy .env.example to .env and fill in your key, or export the variables:
 
     export OPENAI_API_KEY=sk-...
     export OPENAI_BASE_URL=https://api.openai.com/v1   # any OpenAI-compatible API
     export OMNIUSE_MODEL=gpt-4o-mini
+
+Runtime overrides (v5.1): the operator can change live details in conversation
+("is UPI pe mat le, naya QR deta hun") — the agent writes them to
+<data>/runtime.json via the settings toolset, and those values take priority
+over the env vars. No .env editing, no restart — the next tool call sees it.
 """
 
+import json
 import os
 from pathlib import Path
+
+def _runtime_overrides() -> dict:
+    """Live settings the operator changed in conversation (data/runtime.json)."""
+    try:
+        p = Path(data_dir()) / "runtime.json"
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+def _rt_or_env(key: str, env_var: str, default: str = "") -> str:
+    """Runtime override first (operator said so just now), then env."""
+    override = _runtime_overrides().get(key)
+    return str(override) if override not in (None, "") else os.getenv(env_var, default)
 
 
 # ------------------------------------------------------------------ core
@@ -46,14 +65,17 @@ def operator_token() -> str:
     return os.getenv("OMNIUSE_OPERATOR_TOKEN", "")
 
 def stt_model() -> str:
-    """Speech-to-text model for voice control (any OpenAI-compatible endpoint)."""
-    return os.getenv("OMNIUSE_STT_MODEL", "whisper-1")
+    """Speech-to-text model for voice control (runtime override wins)."""
+    return _rt_or_env("stt_model", "OMNIUSE_STT_MODEL", "whisper-1")
+
 def tts_model() -> str:
-    """Text-to-speech model for voice_speak (any OpenAI-compatible endpoint)."""
-    return os.getenv("OMNIUSE_TTS_MODEL", "tts-1")
+    """Text-to-speech model for voice_speak (runtime override wins)."""
+    return _rt_or_env("tts_model", "OMNIUSE_TTS_MODEL", "tts-1")
+
 def tts_voice() -> str:
-    """Voice for text-to-speech (alloy, echo, fable, onyx, nova, shimmer...)."""
-    return os.getenv("OMNIUSE_TTS_VOICE", "alloy")
+    """Voice for text-to-speech (runtime override wins)."""
+    return _rt_or_env("tts_voice", "OMNIUSE_TTS_VOICE", "alloy")
+
 def fast_model() -> str:
     """A cheaper/faster model for routine steps (defaults to the main model).
 
@@ -62,6 +84,7 @@ def fast_model() -> str:
     for planning and vision.
     """
     return os.getenv("OMNIUSE_FAST_MODEL") or model()
+
 def system_allowlist() -> list[str]:
     """Optional fnmatch patterns restricting system_run (empty = unrestricted).
 
@@ -120,12 +143,16 @@ def plugins_dir() -> str:
     return os.getenv("OMNIUSE_PLUGINS_DIR", "plugins")
 
 def upi_vpa() -> str:
-    """The operator's UPI ID (e.g. name@okhdfcbank) for shop payments."""
-    return os.getenv("OMNIUSE_UPI_VPA", "")
+    """The operator's UPI ID (e.g. name@okhdfcbank) for shop payments.
+
+    Reads the runtime override first — if the operator just gave a new UPI/QR
+    in conversation, that one wins over .env, immediately, no restart.
+    """
+    return _rt_or_env("upi_vpa", "OMNIUSE_UPI_VPA")
 
 def payee_name() -> str:
-    """Name shown on UPI payment requests / watermarks."""
-    return os.getenv("OMNIUSE_PAYEE_NAME", "")
+    """Name shown on UPI payment requests / watermarks (runtime override wins)."""
+    return _rt_or_env("payee_name", "OMNIUSE_PAYEE_NAME")
 
 def warn_if_unconfigured() -> str | None:
     if not api_key():
