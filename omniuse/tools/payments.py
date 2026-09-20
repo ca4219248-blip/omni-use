@@ -10,7 +10,7 @@ The selling flow (watermark-first, verify-then-deliver):
     client pays → sends a screenshot → payment_verify_screenshot(...)
       → order becomes 'payment_claimed' (NOT paid — screenshots can be edited)
     payment_check_sms(...) on the operator's phone finds the credit SMS
-n      → order becomes 'paid' automatically
+      → order becomes 'paid' automatically
     then (and only then) send the clean, full-resolution file.
 
 Honesty rules built in:
