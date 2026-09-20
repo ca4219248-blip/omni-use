@@ -8,10 +8,9 @@ skill (not just design) with preview-first selling and verified UPI payments.
 A big local toolbox: text, files, media, CSV, notes and QR toolsets.
 """
 
-__version__ = "4.0.0"
+__version__ = "4.1.0"
 
 __all__ = ["Agent", "Mission", "__version__"]
-
 
 def __getattr__(name):
     # Lazy imports: avoids circular init (agent → tools → omniuse → agent).

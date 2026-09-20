@@ -17,23 +17,24 @@ from omniuse import config
 
 _client: OpenAI | None = None
 
-
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
         _client = OpenAI(api_key=config.api_key(), base_url=config.base_url())
     return _client
 
+def chat(messages, tools=None, fast: bool = False) -> dict:
+    """One chat completion. Returns the assistant message as a plain dict.
 
-def chat(messages, tools=None) -> dict:
-    """One chat completion. Returns the assistant message as a plain dict."""
+    fast=True uses OMNIUSE_FAST_MODEL (falls back to the main model) — for
+    routine steps where a cheap, quick model is enough.
+    """
     response = _get_client().chat.completions.create(
-        model=config.model(),
+        model=config.fast_model() if fast else config.model(),
         messages=messages,
         tools=tools or None,
     )
     return response.choices[0].message.model_dump(exclude_none=True)
-
 
 def describe_image(image_path: str, question: str = "Describe this screen in detail.") -> str:
     """Send an image to a vision-capable model and return its answer."""
@@ -52,7 +53,6 @@ def describe_image(image_path: str, question: str = "Describe this screen in det
         ],
     )
     return response.choices[0].message.content or ""
-
 
 def pretty_tool_call(name: str, arguments: dict) -> str:
     args = json.dumps(arguments, ensure_ascii=False)
