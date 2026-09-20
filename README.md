@@ -6,7 +6,7 @@
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 3.3                   │
+                 │                    OmniUse 4.0                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -18,6 +18,8 @@
                🖱 Universal 📺 Screen  🔌 Plugins  🚀 Missions  🕒 Scheduler
                🧑‍🤝‍🧑 Team     🧾 Budget   🎨 Design   💸 Payments  🛍 Shop
                💡 Ideas     🤝 Prospects   🎙 Voice
+               📝 Text      📁 Files      🖼 Media
+               📊 CSV       🗒 Notes      🔳 QR
 ```
 
 ## What it gives your AI
@@ -45,6 +47,12 @@
 | **payments** | UPI QR (amount pre-filled), order state machine, screenshot reading, **SMS payment verification + payment_wait** |
 | **shop** | Catalog for ANY service, proposals for inbound clients, listing drafts for your own page, **work_preview** for text deliverables, prospect tracking + outreach drafts (operator-sent, one-message rule) |
 | **ideas** | `idea_save`/`idea_list`/`idea_update` — a self-starter: when you have no idea, the agent brainstorms, scores and picks one itself |
+| **text** | Wordcounts, case, replace, regex extract, slugify, diff, head — plus LLM-powered `text_summarize` and `text_translate` |
+| **files** | Read/write/append, tree listing, glob find, folder-size breakdown, Downloads-style `files_organize` (dry-run first), sha256 duplicate finder, zip backups |
+| **media** | Resize (exact/% /ratio), crop, convert (png/jpg/webp/…), compress, contact-sheet thumbnail grids — pure Pillow, no API |
+| **csvdata** | CSV summaries (types, uniques, min/max/mean), aligned head, row filters (equals/contains/gt/…), column select, merge with dedupe, CSV→JSON — stdlib only |
+| **notes** | A searchable personal notebook: add/list/search/delete notes with tags (JSONL storage) |
+| **qr** | QR codes for any text, URL, WiFi credentials and vCard contacts (the UPI payment QR lives in payments) |
 
 The agent works with **any OpenAI-compatible LLM** — OpenAI, Groq, OpenRouter, Together, or a local Ollama/vLLM server.
 
@@ -203,6 +211,16 @@ All config is plain environment variables (see `.env.example`). The essentials:
 - **Paid work & outreach**: a payment screenshot can be faked — the agent will not deliver the full work until a credit SMS lands on your phone (or you `paid <order_id>` it yourself in the console). The agent researches prospects and drafts first-contact messages, but **you** send them from your own account — automated unsolicited messages are spam, and platforms ban for it. One message per prospect; never again to non-responders or decliners.
 - "Earning" online still means following platform terms and the law. The guardrails exist so the agent stays on the right side of both; don't disable them.
 - Read the memory log regularly — that's what it's for.
+
+## Testing
+
+A pytest suite covers the registry, all six local toolsets, and the rules that must never break (paid-work pipeline, one-message rule, killswitch, escalation):
+
+```bash
+python -m pytest tests/ -q
+```
+
+All tests run with a stubbed LLM — no API key needed.
 
 ## Roadmap
 
