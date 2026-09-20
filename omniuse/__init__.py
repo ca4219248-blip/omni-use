@@ -5,7 +5,9 @@ remote machines via the Hub. Eyes: vision on screenshots + structured screen
 reading. Guardrails: policy checks, a capped wallet, escalation, layered
 memory, permissions, budgets, and a killswitch. A paid-work pipeline for ANY
 skill (not just design) with preview-first selling and verified UPI payments.
-A big local toolbox: text, files, media, CSV, notes and QR toolsets.
+A big local toolbox: text, files, media, CSV, notes and QR toolsets. Learns
+from every task (lessons), reports as PDF, and improves itself with the
+operator's approval.
 """
 
 __version__ = "5.0.0"

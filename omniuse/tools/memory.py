@@ -6,6 +6,7 @@ Layers:
   - fact store: key→value memory that survives across runs, split into
     layers (preferences / device / project) so the agent can remember
     things like "my GitHub username is …" without being told twice.
+  - lessons: mistakes + lessons learned, injected into every future task.
 """
 
 from __future__ import annotations
@@ -67,6 +68,46 @@ def recent_runs(n: int = 3) -> list[dict]:
             runs.append(current)
             current = None
     return runs[-max(1, int(n)):] if runs else []
+
+
+# ------------------------------------------------------------ lessons
+# The agent's self-improvement memory: mistakes made and lessons learned,
+# injected into every future task so it does not repeat them.
+
+def _lessons_path() -> Path:
+    return _data_dir() / "lessons.json"
+
+
+def lessons(limit: int = 10) -> list[dict]:
+    p = _lessons_path()
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data[-max(1, min(limit, 100)):] if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def lesson_save(mistake: str, lesson: str) -> str:
+    """Save a lesson from a failure — injected into every future task."""
+    mistake, lesson = (mistake or "").strip(), (lesson or "").strip()
+    if not mistake or not lesson:
+        return "ERROR: both 'mistake' and 'lesson' are required."
+    data = lessons(1000)
+    data.append({"ts": time.time(), "mistake": mistake[:300], "lesson": lesson[:300]})
+    data = data[-200:]  # keep the 200 freshest lessons
+    _lessons_path().write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    log_event("lesson_saved", lesson=lesson[:100])
+    return f"Lesson saved ({len(data)} total): {lesson[:80]}"
+
+
+def lesson_list(limit: int = 20) -> str:
+    data = lessons(limit)
+    if not data:
+        return "No lessons yet (lesson_save after a failure or discovery)."
+    lines = [f"- {d['lesson']}  (from: {d['mistake'][:80]})" for d in data[-max(1, int(limit or 20)):]]
+    return f"{len(data)} lesson(s):\n" + "\n".join(lines)
 
 
 def _format(entry: dict) -> str:
@@ -244,6 +285,38 @@ TOOLS = {
                     "key": {"type": "string"},
                 },
                 "required": ["key"],
+            },
+        },
+    }),
+    "lesson_save": (lesson_save, {
+        "type": "function",
+        "function": {
+            "name": "lesson_save",
+            "description": (
+                "Learn from a failure: save what went WRONG and the LESSON for next time. "
+                "Saved lessons are injected into every future task, so the same mistake "
+                "is never repeated. Call it after any real failure or useful discovery."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mistake": {"type": "string", "description": "What went wrong / what was tried"},
+                    "lesson": {"type": "string", "description": "What to do differently next time"},
+                },
+                "required": ["mistake", "lesson"],
+            },
+        },
+    }),
+    "lesson_list": (lesson_list, {
+        "type": "function",
+        "function": {
+            "name": "lesson_list",
+            "description": "Show the lessons learned so far (injected into every task anyway).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Default 20"},
+                },
             },
         },
     }),
