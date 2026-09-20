@@ -1,12 +1,12 @@
 # OmniUse 🤖
 
-**An AI agent that can actually *use* things** — your browser, your Android phone, your computer, remote machines, a design shop, and (with guardrails) your wallet. You talk to it by typing or just speaking; it plans, acts, observes, self-corrects, and reports back.
+**An AI agent that can actually *use* things** — your browser, your Android phone, your computer, remote machines, a paid-work shop (any skill — not just design), and (with guardrails) your wallet. You talk to it by typing or just speaking; it plans, acts, observes, self-corrects, and reports back.
 
 > Hinglish mein: *Ek AI agent jo aapke browser, phone, computer aur remote machines ko khud use kar sakta hai.* Task bolo — "phone ki notifications padho", "mujhe ₹300 chahiye" — agent khud plan banayega, click karega, verify karega, aur kaam karke report dega.
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 3.2                   │
+                 │                    OmniUse 3.3                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -41,9 +41,9 @@
 | **escalate** | Pause + raise a loud operator alert (terminal banner + alert file) whenever something legally needs a human |
 | **killswitch** | One switch, zero activity — checked before **every** tool call |
 | **plugins** | Drop a folder into `plugins/` (`plugin.json` + `main.py` with a TOOLS dict) — picked up automatically, manifest permissions enforced like built-ins |
-| **design** | `design_poster()` PIL posters (offline) + `design_ai_image()` + `design_watermark()` previews |
+| **design** | `design_poster()` PIL posters (offline) + `design_ai_image()` + `design_watermark()` previews — one example capability |
 | **payments** | UPI QR (amount pre-filled), order state machine, screenshot reading, **SMS payment verification + payment_wait** |
-| **shop** | Catalog, proposals for inbound clients, listing drafts for your own page, prospect tracking + outreach drafts (operator-sent, one-message rule) |
+| **shop** | Catalog for ANY service, proposals for inbound clients, listing drafts for your own page, **work_preview** for text deliverables, prospect tracking + outreach drafts (operator-sent, one-message rule) |
 | **ideas** | `idea_save`/`idea_list`/`idea_update` — a self-starter: when you have no idea, the agent brainstorms, scores and picks one itself |
 
 The agent works with **any OpenAI-compatible LLM** — OpenAI, Groq, OpenRouter, Together, or a local Ollama/vLLM server.
@@ -97,26 +97,28 @@ omniuse> stop / resume / resolve / approve <tool> / revoke / status
 
 Voice needs `OMNIUSE_STT_MODEL` (default `whisper-1`) on any OpenAI-compatible provider; mic recording additionally needs `pip install sounddevice numpy scipy`. Console commands route to the operator tools; everything else runs as a full agent task.
 
-## The design shop: watermark-first, verify-then-deliver 🎨
+## Paid work: any skill, preview-first 🎨
 
-Sell your designs with an honest pipeline — the money rules are enforced in code, not just the prompt:
+The design shop was just the example — the pipeline works for ANY service you can honestly do: writing, research, data work, translations, tutorials, poster designs, anything. The money rules are enforced in code, not just the prompt:
 
 ```
 client messages you (inbound only)
-   → design_poster() / design_ai_image()        make the design
-   → design_watermark()                         watermarked preview
-   → order_create + order_attach                track the order
-   → payment_qr(₹price)                         your UPI QR, amount pre-filled
+   → order_create(client, item, price)           any service, any price
+   → do the work (design tools, writing, browser research, ...)
+   → order_attach(order, preview, full)          PREVIEW the client can judge:
+                                                  design_watermark() for images,
+                                                  work_preview() for text work
+   → payment_qr(₹price)                          your UPI QR, amount pre-filled
    → client pays
-   → payment_wait(order_id)                     agent watches your SMS inbox
-                                                until the bank/UPI credit SMS lands
-   → order_delivered()                          clean full-resolution file, only now
+   → payment_wait(order_id)                      agent watches your SMS inbox
+                                                  until the bank/UPI credit SMS lands
+   → order_delivered()                           the full work, only now
 ```
 
 What's enforced:
 - A payment **screenshot only claims** an order — it never confirms it (screenshots can be edited). Only a credit SMS on your phone (`payment_wait`/`payment_check_sms`) or you yourself (`paid <order_id>` in the console, or `order_mark_paid` with your token) makes an order 'paid'.
 - `order_mark_paid` is denied to the agent — it cannot self-approve a payment.
-- The clean file is refused by `order_delivered()` until the order is verified paid.
+- The full work is refused by `order_delivered()` until the order is verified paid.
 - Every state change lands in the audit log (`data/memory/log.jsonl`).
 
 ## Self-starter: ideas, clients, one-message rule 🧠
@@ -198,7 +200,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 - Exposing the hub beyond localhost (`--host 0.0.0.0`) means anyone with the token can run tools on that machine — use a strong token and a firewall.
 - The scheduler runs missions **without a human watching** — keep daily budgets sane, read the mission reports, and keep the killswitch handy.
 - Crypto payments are irreversible — start with a tiny cap and test in queue-only mode (no `OMNIUSE_SEND_CMD`) first.
-- **Shop & outreach**: a payment screenshot can be faked — the agent will not deliver the clean file until a credit SMS lands on your phone (or you `paid <order_id>` it yourself in the console). The agent researches prospects and drafts first-contact messages, but **you** send them from your own account — automated unsolicited messages are spam, and platforms ban for it. One message per prospect; never again to non-responders or decliners.
+- **Paid work & outreach**: a payment screenshot can be faked — the agent will not deliver the full work until a credit SMS lands on your phone (or you `paid <order_id>` it yourself in the console). The agent researches prospects and drafts first-contact messages, but **you** send them from your own account — automated unsolicited messages are spam, and platforms ban for it. One message per prospect; never again to non-responders or decliners.
 - "Earning" online still means following platform terms and the law. The guardrails exist so the agent stays on the right side of both; don't disable them.
 - Read the memory log regularly — that's what it's for.
 
