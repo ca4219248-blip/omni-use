@@ -3,7 +3,8 @@
 Three levels per tool (optionally gated on an argument pattern):
   allow    → run it
   confirm  → needs operator approval (interactive prompt, or
-             `python -m omniuse.operator approve <tool>` / Telegram /approve)
+             `python -m omniuse.operator approve <tool>` / `approve <tool>`
+             in the console)
   deny     → never runs
 
 Rules live in data/permissions.json and are editable at any time — the

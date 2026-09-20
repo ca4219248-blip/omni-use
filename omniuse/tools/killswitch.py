@@ -3,7 +3,7 @@
 The agent loop checks is_engaged() before EVERY tool call and halts
 immediately if it is on. Engaging is open to anyone (including the agent
 itself — halting is always safe). Disengaging is operator-only, via
-Telegram /resume or `python -m omniuse.operator resume`.
+`python -m omniuse.operator resume` (or `resume` in the console).
 """
 
 from __future__ import annotations
@@ -14,33 +14,27 @@ from pathlib import Path
 
 from omniuse import config
 
-
 def _path() -> Path:
     d = Path(config.data_dir())
     d.mkdir(parents=True, exist_ok=True)
     return d / "killswitch.json"
 
-
 def _read() -> dict:
     p = _path()
     return json.loads(p.read_text()) if p.exists() else {"engaged": False}
-
 
 def engage(reason: str = "") -> str:
     _path().write_text(json.dumps(
         {"engaged": True, "reason": reason, "ts": time.time()}, indent=2))
     return "KILLSWITCH ENGAGED — all agent activity halts immediately."
 
-
 def disengage(reason: str = "operator resumed") -> str:
     _path().write_text(json.dumps(
         {"engaged": False, "reason": reason, "ts": time.time()}, indent=2))
     return "Killswitch disengaged — agent may resume."
 
-
 def is_engaged() -> bool:
     return bool(_read().get("engaged"))
-
 
 def killswitch_status() -> str:
     state = _read()
