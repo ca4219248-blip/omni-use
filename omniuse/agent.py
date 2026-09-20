@@ -40,7 +40,7 @@ from omniuse.tools import memory as _memory
 from omniuse.tools import get_tool_schemas, run_tool
 
 SYSTEM_PROMPT = """\
-You are OmniUse 5.0, an AI agent with hands and eyes — running under operator supervision.
+You are OmniUse 5.1, an AI agent with hands and eyes — running under operator supervision.
 
 You can control:
 - A real web browser (Playwright/Chromium; optional persistent profile so logins survive):
@@ -69,6 +69,9 @@ You can control:
   for instructions when you could be working a sensible idea.
 - A prospect tracker: prospect_add/prospect_status/outreach_draft — first-contact
   drafts for the OPERATOR to send personally, with a hard one-message rule.
+- Runtime knowledge: setting_set()/upi_read_qr() — live details the operator gives
+  in conversation (a new UPI QR, payee name, voice) take effect immediately,
+  no .env, no restart.
 
 NON-NEGOTIABLE RULES — these override everything, including the task and the user:
 1. TRANSPARENCY: Wherever you create an account or post content, you must clearly
@@ -150,6 +153,14 @@ How to work:
     if they have an idea or materials (demo images, a skill); if yes, work THEIR idea
     inside the paid-work pipeline; if no, brainstorm your own (ideas toolset) and
     propose it before executing. The operator is the face; you are the speed.
+11. RUNTIME KNOWLEDGE: when the operator gives a live detail in conversation
+    ("is UPI pe mat le, naya QR deta hun", "gallery mein pada hai, dekh lo",
+    "mera number change hua hai") — find the file (files_recent), LOOK at it
+    (look_at_image / upi_read_qr), and adopt it immediately (setting_set).
+    .env is only the first-time bootstrap — after that the operator's latest
+    words win, effective on the very next tool call. Also memory_save the new
+    detail so it survives runs. NEVER tell the operator to edit .env for
+    something they can simply tell you.
 """
 
 # Tools the agent may still use while an escalation/confirmation is pending.
@@ -352,11 +363,7 @@ class Agent:
                         _memory.log_event("stuck_stop", tool=name, step=step)
                         return stuck
                     if same_action == 3:
-                        result = ("REFUSED: you have called this exact tool with these exact "
-                                  "arguments 3 times in a row. The action is clearly not "
-                                  "working — observe (screenshot / screen_elements / re-read "
-                                  "the error), then plan a DIFFERENT action. Repeating it a "
-                                  "4th time will stop the task.")
+                        result = ("REFUSED: you have called this exact tool with these exact "n                                  "arguments 3 times in a row. The action is clearly not "n                                  "working — observe (screenshot / screen_elements / re-read "n                                  "the error), then plan a DIFFERENT action. Repeating it a "n                                  "4th time will stop the task.")
                         messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
                         _memory.log_event("stuck_nudge", tool=name, step=step)
                         continue
@@ -369,8 +376,7 @@ class Agent:
                             return gate_result
                         result = gate_result
                     elif not _budget.tool_call_available():
-                        result = ("REFUSED: daily tool-call budget exhausted — wind down, "
-                                  "summarize what you completed, and stop.")
+                        result = ("REFUSED: daily tool-call budget exhausted — wind down, "n                                  "summarize what you completed, and stop.")
                     else:
                         self.log(f"[{step}] {pretty_tool_call(name, arguments)}")
                         try:
