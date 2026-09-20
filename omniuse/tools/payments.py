@@ -1,4 +1,4 @@
-"""Payments toolset — UPI QR, order tracking, payment verification.
+"""Payments toolset — UPI QR/link, order tracking, payment verification.
 
 The selling flow (watermark-first, verify-then-deliver):
 
@@ -6,10 +6,11 @@ The selling flow (watermark-first, verify-then-deliver):
     (generate the design, design_watermark it)
     order_attach(order_id, preview, final)     → record file paths
     send the client: watermarked preview + payment_qr(price)
+      (or payment_upi_link(price) — a tappable link, no image needed)
     client pays → sends a screenshot → payment_verify_screenshot(...)
       → order becomes 'payment_claimed' (NOT paid — screenshots can be edited)
     payment_check_sms(...) on the operator's phone finds the credit SMS
-      → order becomes 'paid' automatically
+n      → order becomes 'paid' automatically
     then (and only then) send the clean, full-resolution file.
 
 Honesty rules built in:
@@ -29,32 +30,26 @@ from omniuse.tools import memory as _memory
 
 STATES = ("created", "preview_sent", "payment_claimed", "paid", "delivered")
 
-
 def _shop_dir() -> Path:
     d = Path(config.data_dir()) / "shop"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-
 def _orders_path() -> Path:
     return _shop_dir() / "orders.json"
-
 
 def _orders() -> list[dict]:
     p = _orders_path()
     return json.loads(p.read_text()) if p.exists() else []
 
-
 def _save_orders(orders: list[dict]) -> None:
     _orders_path().write_text(json.dumps(orders, indent=2, ensure_ascii=False))
-
 
 def _find(order_id: str):
     for order in _orders():
         if order["id"] == order_id:
             return order
     return None
-
 
 def _transition(order: dict, state: str, note: str = "") -> None:
     """Apply a state change to the order dict in hand, then persist it
@@ -73,7 +68,6 @@ def _transition(order: dict, state: str, note: str = "") -> None:
 
 
 # ---------------------------------------------------------------- orders
-
 
 def order_create(client: str, item: str, price: float) -> str:
     if not client.strip() or not item.strip():
@@ -96,7 +90,6 @@ def order_create(client: str, item: str, price: float) -> str:
     return (f"Order {order['id']} created for {client.strip()} — {item.strip()} @ ₹{price:.2f}. "
             "Next: design it, watermark it, order_attach the files, then send preview + QR.")
 
-
 def order_attach(order_id: str, preview: str, final: str) -> str:
     order = _find(order_id)
     if not order:
@@ -107,7 +100,6 @@ def order_attach(order_id: str, preview: str, final: str) -> str:
     _transition(order, "preview_sent", "files attached")
     return (f"Attached preview + final to {order_id}. Send ONLY the preview (watermarked) "
             f"with payment_qr({order['price']}). Keep the final file for after verification.")
-
 
 def order_status(order_id: str = "") -> str:
     orders = _orders()
@@ -120,7 +112,6 @@ def order_status(order_id: str = "") -> str:
         return "No orders yet."
     return "\n".join(f"- {o['id']} [{o['state']}] {o['client']} — {o['item']} ₹{o['price']}"
                      for o in orders)
-
 
 def order_mark_paid(order_id: str, operator_token: str = "", reference: str = "") -> str:
     """Operator-only: mark an order paid (e.g. after checking the UPI app)."""
@@ -135,7 +126,6 @@ def order_mark_paid(order_id: str, operator_token: str = "", reference: str = ""
     _transition(order, "paid", f"operator confirmed {reference}".strip())
     return f"Order {order_id} marked PAID (operator-confirmed). You may now deliver the final file."
 
-
 def order_delivered(order_id: str) -> str:
     order = _find(order_id)
     if not order:
@@ -148,7 +138,6 @@ def order_delivered(order_id: str) -> str:
 
 
 # ---------------------------------------------------------------- payment
-
 
 def payment_qr(amount: float, note: str = "design order") -> str:
     """Generate a UPI QR (with amount pre-filled) for the operator's VPA."""
@@ -172,6 +161,28 @@ def payment_qr(amount: float, note: str = "design order") -> str:
         return (f"Send this UPI link to the client (any UPI app opens it): {uri} "
                 "(install the 'qrcode' package to generate QR images)")
 
+
+def payment_upi_link(amount: float, note: str = "design order", order_id: str = "") -> str:
+    """A tappable upi:// deep link (no image needed) for the operator's VPA.
+
+    Send it in any chat — tapping it opens the client's UPI app with the
+    amount pre-filled. Works even without the qrcode package.
+    """
+    vpa = config.upi_vpa()
+    if not vpa:
+        return "ERROR: OMNIUSE_UPI_VPA is not set (the operator's UPI ID)."
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return "ERROR: amount must be a number."
+    if amount <= 0:
+        return "ERROR: amount must be positive."
+    from urllib.parse import quote
+    label = f"{note[:30]} {order_id}".strip() if order_id else note[:40]
+    uri = (f"upi://pay?pa={quote(vpa)}&pn={quote(config.payee_name() or 'Payment')}"
+           f"&am={amount:.2f}&cu=INR&tn={quote(label)}")
+    return (f"UPI payment link for the client (tap → UPI app opens with ₹{amount:.2f} "
+            f"to {vpa}):\n{uri}")
 
 def payment_verify_screenshot(image_path: str, order_id: str = "") -> str:
     """Read a client's payment screenshot with vision — claims, never confirms."""
@@ -198,7 +209,6 @@ def payment_verify_screenshot(image_path: str, order_id: str = "") -> str:
     return (f"SCREENSHOT READ (unverified — screenshots can be edited):\n{extraction}\n"
             f"Next step: confirm the credit actually arrived — payment_check_sms() on the "
             f"operator's phone, or operator confirmation.{claimed}")
-
 
 def payment_check_sms(minutes: int = 120, mark_paid: bool = True) -> str:
     """Check the operator's phone SMS inbox for a UPI/bank credit confirmation.
@@ -240,7 +250,6 @@ def payment_check_sms(minutes: int = 120, mark_paid: bool = True) -> str:
                 f"you may now deliver the final files. (matched: {hits[0][:120]})")
     return (f"Credit SMS found but no matching order amount: {hits[0][:150]}. "
             "Check payment_check_sms window or the order price.")
-
 
 def payment_wait(order_id: str, timeout_minutes: int = 15, poll_seconds: int = 20) -> str:
     """Wait for a specific order's payment to land: keeps checking the
@@ -358,6 +367,24 @@ TOOLS = {
                 "properties": {
                     "amount": {"type": "number", "description": "Amount in ₹"},
                     "note": {"type": "string", "description": "Payment note shown in the UPI app"},
+                },
+                "required": ["amount"],
+            },
+        },
+    }),
+    "payment_upi_link": (payment_upi_link, {
+        "type": "function",
+        "function": {
+            "name": "payment_upi_link",
+            "description": ("A tappable upi:// payment link (no image needed) for the operator's UPI — "
+                            "the client taps it in any chat and their UPI app opens with the amount "
+                            "pre-filled."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "number", "description": "Amount in ₹"},
+                    "note": {"type": "string"},
+                    "order_id": {"type": "string", "description": "Attach the order id to the note"},
                 },
                 "required": ["amount"],
             },
