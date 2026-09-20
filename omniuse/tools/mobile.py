@@ -22,7 +22,6 @@ _KEYCODES = {
     "delete": 67, "volume_up": 24, "volume_down": 25, "power": 26,
 }
 
-
 def _adb(*args: str, timeout: int = 30) -> str:
     try:
         result = subprocess.run(
@@ -34,7 +33,6 @@ def _adb(*args: str, timeout: int = 30) -> str:
         raise RuntimeError(f"adb {' '.join(args)} failed: {result.stderr.strip()}")
     return (result.stdout or "").strip()
 
-
 def _shell(command: str, timeout: int = 30) -> str:
     return _adb("shell", command, timeout=timeout)
 
@@ -44,6 +42,23 @@ def _shell(command: str, timeout: int = 30) -> str:
 
 def mobile_devices() -> str:
     return _adb("devices") or "No devices found."
+
+def mobile_connect(ip_port: str) -> str:
+    """Connect to a phone over WiFi (wireless ADB) — no USB cable needed.
+
+    On the phone: Developer options → Wireless debugging → Pair/enable, then
+    pass the ip:port shown there (or run `adb pair` once on this machine).
+    On the phone itself (Termux): pkg install adb works too.
+    """
+    target = (ip_port or "").strip()
+    if not target or ":" not in target:
+        return "ERROR: give the phone's ip:port, e.g. 192.168.1.5:5555"
+    out = _adb("connect", target)
+    if "connected" not in out.lower():
+        return (f"Could not connect to {target} ({out}). Enable Wireless debugging "
+                "on the phone (Developer options) and try again; `adb pair` may "
+                "be needed first.")
+    return f"Connected to {target}. mobile_devices / screen_elements(device='mobile') now work over WiFi."
 
 
 def mobile_tap(x: int, y: int) -> str:
@@ -100,6 +115,22 @@ TOOLS = {
             "parameters": {"type": "object", "properties": {}},
         },
     }),
+    "mobile_connect": (mobile_connect, {
+        "type": "function",
+        "function": {
+            "name": "mobile_connect",
+            "description": ("Connect to an Android phone over WiFi (wireless ADB) — no USB "
+                            "cable needed. Give the ip:port from Developer options → Wireless "
+                            "debugging."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ip_port": {"type": "string", "description": "e.g. 192.168.1.5:5555"},
+                },
+                "required": ["ip_port"],
+            },
+        },
+    }),
     "mobile_tap": (mobile_tap, {
         "type": "function",
         "function": {
@@ -138,7 +169,9 @@ TOOLS = {
             "description": "Type text into the currently focused field on the phone.",
             "parameters": {
                 "type": "object",
-                "properties": {"text": {"type": "string"}},
+                "properties": {
+                    "text": {"type": "string"},
+                },
                 "required": ["text"],
             },
         },
@@ -150,7 +183,9 @@ TOOLS = {
             "description": "Press a hardware/nav key: back, home, enter, tab, escape, delete, volume_up, volume_down, power.",
             "parameters": {
                 "type": "object",
-                "properties": {"key": {"type": "string"}},
+                "properties": {
+                    "key": {"type": "string"},
+                },
                 "required": ["key"],
             },
         },
@@ -170,7 +205,9 @@ TOOLS = {
             "description": "Run an arbitrary `adb shell` command on the phone (e.g. 'dumpsys battery', 'pm list packages').",
             "parameters": {
                 "type": "object",
-                "properties": {"command": {"type": "string"}},
+                "properties": {
+                    "command": {"type": "string"},
+                },
                 "required": ["command"],
             },
         },
