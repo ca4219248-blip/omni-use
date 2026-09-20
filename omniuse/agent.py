@@ -14,10 +14,13 @@ Wired into the loop itself (not just the prompt):
   - memory:      every tool call is auto-logged, remembered facts and the
                  last few completed runs are injected into every task's
                  context, so the agent knows what it already did.
+  - lessons:     lessons learned from past failures + the operator-approved
+                 self-improvement profile are injected into every task.
   - self-correction: after repeated failures the agent gets an explicit
                  nudge to stop guessing, observe the real screen, and rethink.
   - stuck detection: the exact same tool call 3 times in a row gets a
                  replan warning; a 4th stops the task — no infinite loops.
+  - auto-router: toolsets="auto" picks only the toolsets the task needs.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import json
 import sys
 import time
 import traceback
+from pathlib import Path
 
 from omniuse import budget as _budget
 from omniuse import config, permissions
@@ -36,7 +40,7 @@ from omniuse.tools import memory as _memory
 from omniuse.tools import get_tool_schemas, run_tool
 
 SYSTEM_PROMPT = """\
-You are OmniUse 4.1, an AI agent with hands and eyes — running under operator supervision.
+You are OmniUse 5.0, an AI agent with hands and eyes — running under operator supervision.
 
 You can control:
 - A real web browser (Playwright/Chromium; optional persistent profile so logins survive):
@@ -138,6 +142,14 @@ How to work:
    rank, idea_update the pick to 'active'), propose the plan, and start
    working it within the guardrails.
 8. When the task is done, stop calling tools and give a clear final answer.
+9. LEARN: after any real failure or useful discovery, lesson_save(mistake, lesson)
+   so the same mistake is never repeated — lessons are injected into your future
+   tasks. After a significant task completes, task_report() a full PDF report
+   (what was done, how, what failed, what was learned) and give the operator the path.
+10. MONEY TASKS: if the operator asks for money ("mujhe ₹300 chahiye") — first ASK
+    if they have an idea or materials (demo images, a skill); if yes, work THEIR idea
+    inside the paid-work pipeline; if no, brainstorm your own (ideas toolset) and
+    propose it before executing. The operator is the face; you are the speed.
 """
 
 # Tools the agent may still use while an escalation/confirmation is pending.
@@ -158,6 +170,9 @@ _FACTS_HEADER = "\n\nREMEMBERED FACTS (persistent memory — use these, don't re
 
 _RUNS_HEADER = "\n\nRECENT RUNS (what you were asked and concluded lately — don't redo finished work, build on it):\n"
 
+_LESSONS_HEADER = ("\n\nLESSONS LEARNED from past failures — apply these, never repeat "
+                   "these mistakes):\n")
+
 def _runs_block() -> str:
     runs = _memory.recent_runs(3)
     if not runs:
@@ -167,6 +182,30 @@ def _runs_block() -> str:
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(r.get("when", 0)))
         lines.append(f"- [{when}] task: {r.get('task', '')} → result: {r.get('answer', '')}")
     return _RUNS_HEADER + "\n".join(lines)
+
+def _lessons_block() -> str:
+    data = _memory.lessons(10)
+    if not data:
+        return ""
+    lines = [f"- {d.get('lesson', '')}" for d in data]
+    return _LESSONS_HEADER + "\n".join(lines)
+
+def _profile_block() -> str:
+    """The operator-approved self-improvement profile (data/agent-profile.md).
+
+    The operator's `improve` command reviews past reports/lessons and can
+    append concrete behaviour rules here — this is how the agent gets better
+    over time without anyone editing its source code.
+    """
+    p = Path(config.data_dir()) / "agent-profile.md"
+    try:
+        text = p.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if not text:
+        return ""
+    return ("\n\nOPERATOR-APPROVED IMPROVEMENTS (from your own past mistakes — "
+            "follow these exactly):\n" + text[:4000])
 
 def _facts_block() -> str:
     facts = _memory.snapshot()
@@ -182,7 +221,8 @@ class Agent:
     """A tool-using agent.
 
     Args:
-        toolsets: Which toolsets to enable. None = all.
+        toolsets: Which toolsets to enable. None = all. "auto" = let the
+                  auto-router pick from the task text.
         max_steps: Safety cap on how many LLM turns the agent may take.
         verbose: Print each tool call and result to stdout.
     """
@@ -225,19 +265,29 @@ class Agent:
 
     def run(self, task: str) -> str:
         """Run the agent on a task and return its final answer."""
-        tools = get_tool_schemas(self.toolsets)
-        if not tools:
-            raise ValueError("No tools enabled — check the `toolsets` argument.")
-
-        messages: list[dict] = [
-            {"role": "system", "content": SYSTEM_PROMPT + _facts_block() + _runs_block()},
-            {"role": "user", "content": task},
-        ]
         final_answer = "Agent stopped without a final answer."
         consecutive_errors = 0
         last_signature = None
         same_action = 0
         _memory.log_event("task_start", task=task, toolsets=self.toolsets)
+
+        # ---- auto-router: "auto" = pick toolsets from the task text ----
+        if self.toolsets in ("auto", ["auto"]):
+            from omniuse import router as _router
+            picked = _router.suggest_toolsets(task)
+            self.log(f"\n🧭 auto-router picked: {picked}")
+            self.toolsets = picked
+
+        tools = get_tool_schemas(self.toolsets)
+        if not tools:
+            raise ValueError("No tools enabled — check the `toolsets` argument.")
+
+        messages: list[dict] = [
+            {"role": "system",
+             "content": (SYSTEM_PROMPT + _lessons_block() + _profile_block()
+                         + _facts_block() + _runs_block())},
+            {"role": "user", "content": task},
+        ]
 
         for step in range(1, self.max_steps + 1):
             # ---- daily budget ----
