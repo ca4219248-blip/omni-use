@@ -2,17 +2,16 @@
 
 Anything that requires human legal identity — KYC, bank accounts, contracts,
 signatures, tax forms — must be escalated with escalate_to_operator(). The
-task then pauses until the operator resolves it (Telegram /resolve, or
-`python -m omniuse.operator resolve`).
+task then pauses until the operator resolves it (`python -m omniuse.operator
+resolve` in the terminal, or /resolve in the console REPL).
 """
 
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from omniuse import config
 
@@ -47,30 +46,26 @@ def resolve(note: str = "resolved by operator") -> str:
     return "Escalation resolved — the agent may continue."
 
 
-def _telegram_send(text: str) -> str:
-    token, chat = config.telegram_bot_token(), config.telegram_chat_id()
-    if not token or not chat:
-        return "Telegram not configured (set OMNIUSE_TELEGRAM_BOT_TOKEN / OMNIUSE_TELEGRAM_CHAT_ID)"
-    data = urlencode({"chat_id": chat, "text": text}).encode()
-    req = Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
-    try:
-        with urlopen(req, timeout=30) as r:
-            ok = json.loads(r.read()).get("ok")
-        return "Telegram: delivered" if ok else "Telegram: delivery failed"
-    except Exception as e:  # report, never crash the agent
-        return f"Telegram: failed ({e})"
+def _notify(reason: str, task: str) -> None:
+    """Loud terminal banner + file — no external messaging service."""
+    banner = ("\n" + "=" * 60 + "\n⚠️  OMNIUSE ESCALATION — OPERATOR NEEDED\n"
+              f"Task: {task or '(current task)'}\nReason: {reason}\n"
+              "The agent is PAUSED. Resolve with `python -m omniuse.operator resolve`\n"
+              "(or /resolve in the console), or halt it with /stop.\n" + "=" * 60 + "\n")
+    print(banner, file=sys.stderr, flush=True)
+    try:                                    # also keep a notification file
+        (_path().parent / "escalation-alert.txt").write_text(banner)
+    except OSError:
+        pass
 
 
 def escalate_to_operator(reason: str, task: str = "") -> str:
     _path().write_text(json.dumps(
         {"pending": True, "reason": reason, "task": task, "ts": time.time()}, indent=2))
-    delivery = _telegram_send(
-        "⚠️ OmniUse escalation\n"
-        f"Task: {task or '(current task)'}\nReason: {reason}\n\n"
-        "The agent is PAUSED. Resolve with /resolve (or "
-        "`python -m omniuse.operator resolve`), or halt it with /stop.")
+    _notify(reason, task)
     return ("TASK PAUSED pending operator resolution. Do NOT attempt the escalated "
-            f"action yourself. Check with escalate_status() before doing anything else. ({delivery})")
+            f"action yourself. Check with escalate_status() before doing anything else. "
+            "(alert raised in the operator's terminal)")
 
 
 def escalate_status() -> str:

@@ -49,17 +49,14 @@ def data_dir() -> str:
     return os.getenv("OMNIUSE_DATA_DIR", "data")
 
 
-def telegram_bot_token() -> str:
-    return os.getenv("OMNIUSE_TELEGRAM_BOT_TOKEN", "")
-
-
-def telegram_chat_id() -> str:
-    return os.getenv("OMNIUSE_TELEGRAM_CHAT_ID", "")
-
-
 def operator_token() -> str:
     """Secret token only the human operator knows (for raising spend limits)."""
     return os.getenv("OMNIUSE_OPERATOR_TOKEN", "")
+
+
+def stt_model() -> str:
+    """Speech-to-text model for voice control (any OpenAI-compatible endpoint)."""
+    return os.getenv("OMNIUSE_STT_MODEL", "whisper-1")
 
 
 # ---------------------------------------------------------------- wallet
