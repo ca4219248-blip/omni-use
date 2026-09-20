@@ -1,9 +1,12 @@
-"""Shop toolset — sell your work, without spamming anyone.
+"""Shop toolset — sell ANY work, without spamming anyone.
 
 What this toolset does:
-  - catalog_list/add/remove: what you sell and at what price
-  - shop_proposal: a ready-to-send offer (price + watermarked preview +
-    UPI QR + next steps) for a client who CONTACTED US
+  - catalog_list/add/remove: what you sell and at what price — ANY service
+    (designs, writing, research, data work, tutorials, anything)
+  - shop_proposal: a ready-to-send offer (price + preview + UPI QR + next
+    steps) for a client who CONTACTED US
+  - work_preview: make a partial/teaser version of any TEXT deliverable —
+    the "watermark" equivalent for non-design work
   - shop_listing_draft: marketing copy + a poster for the operator's OWN
     account/page (post it yourself, or let the agent post it after
     policy_check — with AI disclosure)
@@ -92,15 +95,56 @@ def shop_proposal(client: str, item: str, order_id: str = "") -> str:
     return (
         f"PROPOSAL for {client.strip()} (send via the channel they contacted us on):\n\n"
         f"Hi {client.strip()}! Thanks for reaching out 🙏\n"
-        f"Here's a WATERMARKED PREVIEW of your {item.strip()} design: <attach the watermarked file>\n"
+        f"Here's a PREVIEW of your {item.strip()} order: <attach the preview file — "
+        f"watermarked image for designs, work_preview() output for text work>\n"
         f"Price: {price_line}\n"
-        f"To get the full high-resolution file without the watermark:\n"
+        f"To get the complete, full version:\n"
         f"1. Pay via UPI (QR below / UPI ID: {payee})\n"
-        f"2. Send me the payment screenshot\n"
-        f"3. I'll verify and deliver the final design right away 🎨\n\n"
-        f"Attach: the watermarked preview + payment_qr({price if price else 'amount'}) image."
+        f"2. I'll verify and deliver the full work right away ✨\n\n"
+        f"Attach: the preview + payment_qr({price if price else 'amount'}) image."
         + (f"\nOrder: {order_id}" if order_id else "")
     )
+
+
+def work_preview(content: str, fraction: float = 0.4) -> str:
+    """Make a partial preview of any TEXT deliverable (the watermark
+    equivalent for non-design work: writing, research, data summaries,
+    translations, code help...). Give it a file path or the text itself.
+
+    The client sees the first `fraction` of the work + a clear notice that
+    the rest arrives after payment. The full version only ever goes out via
+    the order pipeline once the order is verified 'paid'."""
+    from pathlib import Path as P
+    text = content.strip()
+    looks_like_path = len(text) < 300 and ("/" in text or text.startswith("."))
+    try:
+        is_file = looks_like_path and P(text).is_file()
+    except OSError:
+        is_file = False
+    if looks_like_path and not is_file:
+        return f"ERROR: file not found: {text}"
+    if is_file:
+        try:
+            text = P(text).read_text(encoding="utf-8", errors="replace").strip()
+        except OSError as e:
+            return f"ERROR: could not read the file ({e})."
+    if not text:
+        return "ERROR: give me the text (or a path to a text file) to preview."
+    try:
+        fraction = min(0.9, max(0.1, float(fraction)))
+    except (TypeError, ValueError):
+        fraction = 0.4
+    cut = max(1, int(len(text) * fraction))
+    # cut at a word/line boundary so the preview doesn't end mid-word
+    while cut < len(text) and not text[cut].isspace():
+        cut += 1
+    preview = text[:cut].rstrip()
+    notice = (f"\n\n— — — PREVIEW — about {int(fraction * 100)}% of the work — "
+              f"the complete version is delivered right after payment ✨ — — —")
+    out = _shop_dir() / f"preview-{int(time.time())}.txt"
+    out.write_text(preview + notice, encoding="utf-8")
+    return (f"Preview saved to {out} ({len(preview)} of {len(text)} chars). Send THIS to "
+            f"the client; keep the full version for after payment is verified.")
 
 
 def shop_listing_draft(item: str, platform: str = "instagram") -> str:
@@ -118,7 +162,7 @@ def shop_listing_draft(item: str, platform: str = "instagram") -> str:
         f"DRAFT LISTING ({platform}) — for the operator's own account:\n\n"
         f"✨ Custom {entry['item']} ✨\n"
         f"From ₹{entry['price']:.0f} — made just for you.\n"
-        f" watermark preview first, full file after payment.\n"
+        f" preview first, full work after payment.\n"
         f"DM to order!\n\n"
         f"(Remember: if the agent posts this itself, disclose it's an AI and "
         f"run policy_check('{platform}') first.)\n{poster}"
@@ -212,11 +256,11 @@ def outreach_draft(name: str, item: str, channel: str = "whatsapp") -> str:
     price = entry["price"]
     draft = (
         f"FIRST-CONTACT DRAFT for {channel} — THE OPERATOR SENDS THIS PERSONALLY (never the agent):\n\n"
-        f"Hi {p['name']}! I'm {config.payee_name() or 'the operator'} — I make custom "
-        f"{entry['item'].lower()}s for small businesses" +
+        f"Hi {p['name']}! I'm {config.payee_name() or 'the operator'} — I do custom "
+        f"{entry['item'].lower()} work for small businesses" +
         (f" like {p['notes'][:60]}" if p.get("notes") else "") +
-        f". I made one sample for you — want me to send it over? If you like it, "
-        f"it's ₹{price:.0f} for the full design, no payment until you've seen it. "
+        f". I've done a sample of the kind of work I can do for you — want me to send it over? "
+        f"If you like it, it's ₹{price:.0f} for the full job, no payment until you've seen a preview. "
         f"If it's not for you, no worries at all. 🙏\n\n"
         f"RULES (enforced): send this ONCE from your own account; if no reply, leave it — "
         f"prospect_status('{p['name']}', 'contacted') after sending, "
@@ -238,11 +282,11 @@ TOOLS = {
         "type": "function",
         "function": {
             "name": "catalog_add",
-            "description": "Add an item to the shop catalog.",
+            "description": "Add an item (ANY service) to the shop catalog.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "item": {"type": "string", "description": "e.g. 'Instagram post design'"},
+                    "item": {"type": "string", "description": "e.g. 'Instagram post design', 'Assignment writeup'"},
                     "price": {"type": "number"},
                     "note": {"type": "string", "description": "Short description"},
                 },
@@ -262,13 +306,34 @@ TOOLS = {
             },
         },
     }),
+    "work_preview": (work_preview, {
+        "type": "function",
+        "function": {
+            "name": "work_preview",
+            "description": (
+                "Make a partial preview of any TEXT deliverable (writing, research, data "
+                "work, translations...) — the watermark equivalent for non-design work. "
+                "Give a file path or the text itself; returns a saved preview file with "
+                "a payment notice. Use for ANY service that isn't an image: preview-first "
+                "selling applies to all work, not just designs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The full work text, or a path to it"},
+                    "fraction": {"type": "number", "description": "How much to show, 0.1-0.9 (default 0.4)"},
+                },
+                "required": ["content"],
+            },
+        },
+    }),
     "shop_proposal": (shop_proposal, {
         "type": "function",
         "function": {
             "name": "shop_proposal",
             "description": (
                 "Compose an offer for a client who CONTACTED US first: price, "
-                "watermarked preview, UPI QR instructions, delivery promise. "
+                "preview, UPI QR instructions, delivery promise. "
                 "For inbound inquiries only — never send to strangers."
             ),
             "parameters": {
