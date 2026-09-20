@@ -50,6 +50,25 @@ def _entries() -> list[dict]:
     return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def recent_runs(n: int = 3) -> list[dict]:
+    """The last n completed runs: {task, answer, when} — for context injection.
+
+    Built from task_start/task_end events in the event log, so the agent
+    walks into each new task already knowing what it did recently.
+    """
+    runs: list[dict] = []
+    current: dict | None = None
+    for e in _entries():
+        kind = e.get("kind")
+        if kind == "task_start":
+            current = {"task": str(e.get("task", ""))[:200], "when": e.get("ts", 0)}
+        elif kind == "task_end" and current is not None:
+            current["answer"] = str(e.get("answer", ""))[:300]
+            runs.append(current)
+            current = None
+    return runs[-max(1, int(n)):] if runs else []
+
+
 def _format(entry: dict) -> str:
     stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry.get("ts", 0)))
     rest = ", ".join(f"{k}={str(v)[:120]}" for k, v in entry.items()
@@ -159,7 +178,9 @@ TOOLS = {
             "description": "Show the most recent memory entries.",
             "parameters": {
                 "type": "object",
-                "properties": {"n": {"type": "integer", "description": "How many entries (default 10)"}},
+                "properties": {
+                    "n": {"type": "integer", "description": "How many entries (default 10)"},
+                },
             },
         },
     }),
@@ -190,7 +211,7 @@ TOOLS = {
                 "type": "object",
                 "properties": {
                     "key": {"type": "string"},
-                    "value": {"description": "The fact to remember (string/number/JSON)"},
+                    "value": {"type": "string", "description": "The fact to remember (string/number/JSON)"},
                     "layer": {"type": "string", "enum": ["preferences", "device", "project"],
                               "description": "preferences (about the user), device (about this machine), project"},
                 },
@@ -205,7 +226,9 @@ TOOLS = {
             "description": "Recall a remembered fact.",
             "parameters": {
                 "type": "object",
-                "properties": {"key": {"type": "string"}},
+                "properties": {
+                    "key": {"type": "string"},
+                },
                 "required": ["key"],
             },
         },
@@ -217,7 +240,9 @@ TOOLS = {
             "description": "Delete a remembered fact.",
             "parameters": {
                 "type": "object",
-                "properties": {"key": {"type": "string"}},
+                "properties": {
+                    "key": {"type": "string"},
+                },
                 "required": ["key"],
             },
         },

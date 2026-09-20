@@ -1,13 +1,41 @@
-"""System toolset — run shell commands and work with files on the local machine."""
+"""System toolset — run shell commands and work with files on the local machine.
+
+Optionally sandboxed by an allowlist: set OMNIUSE_SYSTEM_ALLOWLIST to a
+comma-separated list of fnmatch patterns (e.g. "ls*,cat*,git status,python*")
+and system_run refuses anything that doesn't match — a poor man's Docker.
+Risky actions stay behind the permissions system regardless (see
+permissions.json defaults).
+"""
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import subprocess
 from pathlib import Path
 
+from omniuse import config
+
+
+def _allowlist_verdict(command: str) -> str | None:
+    """None if allowed, else a REFUSED message explaining what's allowed."""
+    patterns = config.system_allowlist()
+    if not patterns:
+        return None  # unrestricted (default)
+    first_word = command.strip().split(None, 1)[0] if command.strip() else ""
+    for pattern in patterns:
+        if fnmatch.fnmatch(command, pattern) or fnmatch.fnmatch(first_word, pattern):
+            return None
+    return ("REFUSED: command not on the system allowlist. The operator set "
+            f"OMNIUSE_SYSTEM_ALLOWLIST={patterns}. Only commands matching one of "
+            "those patterns may run — ask the operator to run it personally or to "
+            "extend the allowlist.")
+
 
 def system_run(command: str, timeout: int = 60) -> str:
+    refused = _allowlist_verdict(command)
+    if refused:
+        return refused
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True,
@@ -94,7 +122,9 @@ TOOLS = {
             "description": "List the contents of a directory.",
             "parameters": {
                 "type": "object",
-                "properties": {"path": {"type": "string", "description": "Default '.'"}},
+                "properties": {
+                    "path": {"type": "string", "description": "Default '.'"},
+                },
             },
         },
     }),
