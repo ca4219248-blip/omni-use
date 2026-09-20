@@ -1,8 +1,9 @@
 """Files toolset — everyday local-file superpowers (stdlib only).
 
-Read/write/append, list trees, find by glob, organize a folder by file
-type, find duplicates by hash, report folder sizes, and zip backups.
-Everything is plain Python — no extra dependencies.
+Read/write/append, list trees, find by glob, most-recent files (gallery
+style), organize a folder by file type, find duplicates by hash, report
+folder sizes, and zip backups. Everything is plain Python — no extra
+dependencies.
 """
 
 from __future__ import annotations
@@ -11,14 +12,13 @@ import hashlib
 import json
 import os
 import shutil
+import time
 import zipfile
 from pathlib import Path
-
 
 def _safe_root(path: str) -> Path:
     p = Path(path).expanduser().resolve()
     return p
-
 
 def files_write(path: str, content: str, append: bool = False) -> str:
     """Write (or append to) a text file, creating parent folders."""
@@ -34,7 +34,6 @@ def files_write(path: str, content: str, append: bool = False) -> str:
     return (f"Appended {len(content)} chars to {p}" if append
             else f"Wrote {len(content)} chars to {p}")
 
-
 def files_read(path: str, lines: int = 0) -> str:
     """Read a text file (optionally only the first N lines)."""
     p = _safe_root(path)
@@ -49,7 +48,6 @@ def files_read(path: str, lines: int = 0) -> str:
     if len(text) > 8000:
         text = text[:8000] + f"\n...[truncated, file is {p.stat().st_size} bytes]"
     return text or "(empty file)"
-
 
 def files_list(path: str = ".", pattern: str = "*", depth: int = 3) -> str:
     """List a folder as a tree (glob-filterable, depth-limited)."""
@@ -73,7 +71,6 @@ def files_list(path: str = ".", pattern: str = "*", depth: int = 3) -> str:
         return f"Nothing matching '{pattern}' in {root}."
     return "\n".join(entries[:300])
 
-
 def files_find(root: str = ".", pattern: str = "*") -> str:
     """Recursively find files/folders matching a glob pattern."""
     base = _safe_root(root)
@@ -84,6 +81,30 @@ def files_find(root: str = ".", pattern: str = "*") -> str:
         return f"No matches for '{pattern}' under {base}."
     return "\n".join(hits)
 
+
+def files_recent(pattern: str = "*", root: str = ".", n: int = 20) -> str:
+    """Most recently modified files, NEWEST FIRST — "gallery mein dekh lo".
+
+    The operator says a file is "in my gallery/downloads" — this finds what
+    landed recently (photos, screenshots, downloads), so the agent can then
+    look_at_image the newest ones like a human would.
+    """
+    base = _safe_root(root)
+    if not base.is_dir():
+        return f"ERROR: folder not found: {root}"
+    try:
+        hits = [(p.stat().st_mtime, p) for p in base.rglob(pattern) if p.is_file()]
+    except OSError as e:
+        return f"ERROR: {e}"
+    if not hits:
+        return f"No matches for '{pattern}' under {base}."
+    hits.sort(reverse=True)
+    lines = []
+    for mtime, p in hits[:max(1, min(int(n), 100))]:
+        stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime))
+        lines.append(f"- {stamp}  {p.relative_to(base)}")
+    return (f"{len(hits)} file(s) matching '{pattern}', newest first "
+            f"(look_at_image reads the image ones):\n" + "\n".join(lines))
 
 def files_sizes(path: str = ".") -> str:
     """Per-subfolder size breakdown of a folder."""
@@ -116,7 +137,6 @@ def files_sizes(path: str = ".") -> str:
             rows.append(f"{child.stat().st_size:>10,}  {child.name}")
     total = dir_size(root)
     return "\n".join(rows[:100]) + f"\n{'─' * 30}\nTOTAL: {human(total)} ({total:,} bytes)"
-
 
 def files_organize(path: str = ".", dry_run: bool = True) -> str:
     """Sort files in a folder into subfolders by extension
@@ -163,7 +183,6 @@ def files_organize(path: str = ".", dry_run: bool = True) -> str:
             pass
     return f"Moved {moved}/{len(moves)} files into category folders."
 
-
 def files_duplicates(path: str = ".") -> str:
     """Find duplicate files by content hash."""
     root = _safe_root(path)
@@ -195,7 +214,6 @@ def files_duplicates(path: str = ".") -> str:
             pass
     return ("\n".join(lines) +
             f"\n\n{len(dups)} duplicate group(s), ~{wasted:,} bytes wasted.")
-
 
 def files_backup(path: str, zip_path: str = "") -> str:
     """Zip a folder (or a single file) into a backup archive."""
@@ -271,6 +289,25 @@ TOOLS = {
                 "properties": {
                     "root": {"type": "string"},
                     "pattern": {"type": "string", "description": "Glob pattern, e.g. '**/*.log' or '*.pdf'"},
+                },
+            },
+        },
+    }),
+    "files_recent": (files_recent, {
+        "type": "function",
+        "function": {
+            "name": "files_recent",
+            "description": (
+                "Most recently modified files, newest first — when the operator says "
+                "something is 'in my gallery / downloads / folder', use this to see what "
+                "landed recently, then look_at_image the newest image files."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Glob like '*.jpg' or '*'"},
+                    "root": {"type": "string", "description": "Folder to search (default: current)"},
+                    "n": {"type": "integer", "description": "How many to show (default 20)"},
                 },
             },
         },
