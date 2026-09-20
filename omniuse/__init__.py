@@ -4,11 +4,12 @@ Hands: a real browser, an Android phone (via ADB), the local computer, and
 remote machines via the Hub. Eyes: vision on screenshots + structured screen
 reading. Guardrails: policy checks, a capped wallet, escalation, layered
 memory, permissions, budgets, and a killswitch. 3.0 added a design shop:
-watermark-first selling over UPI with verified payments. 3.1 adds a
-self-starter (ideas) and operator-sent outreach with a one-message rule.
+watermark-first selling over UPI with verified payments. 3.1 added a
+self-starter (ideas) and operator-sent outreach. 3.2 moves all control to
+the terminal + voice, and the agent verifies payments itself (payment_wait).
 """
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 __all__ = ["Agent", "Mission", "__version__"]
 
