@@ -10,10 +10,13 @@ Telegram mode (long polling; run in a terminal or as a service):
     /approve <tool>       approve a confirm-gated tool (e.g. wallet_send)
     /revoke <tool>        revoke that approval
     /status               killswitch + escalation status
+    /orders               list shop orders (design shop pipeline)
+    /paid <order_id>      YOU confirming a payment arrived — marks the order paid
+                          so the agent can deliver the final design
 
 One-shot CLI (no Telegram needed):
 
-    python -m omniuse.operator stop|resume|resolve|approve <tool>|revoke <tool>|status
+    python -m omniuse.operator stop|resume|resolve|approve <tool>|revoke <tool>|status|orders|paid <order_id>
 """
 
 from __future__ import annotations
@@ -54,7 +57,18 @@ def _handle(message: str) -> str:
         return _permissions.revoke(rest.strip())
     if cmd == "/status":
         return (_killswitch.killswitch_status() + "\n" + _escalate.escalate_status())
-    return "Unknown command. Use /stop, /resume, /resolve, /approve, /revoke or /status."
+    if cmd == "/orders":
+        from omniuse.tools import payments as _payments
+        return _payments.order_status()
+    if cmd == "/paid":
+        order_id = rest.strip()
+        if not order_id:
+            return "Usage: /paid <order_id> — run /orders first to see the ids."
+        from omniuse.tools import payments as _payments
+        # the human typing this on the operator channel IS the operator's confirmation
+        return _payments.order_mark_paid(order_id, operator_token=config.operator_token())
+    return ("Unknown command. Use /stop, /resume, /resolve, /approve, /revoke, "
+            "/status, /orders or /paid <order_id>.")
 
 
 def run_cli(argv: list[str]) -> int:
@@ -71,8 +85,14 @@ def run_cli(argv: list[str]) -> int:
         out = _permissions.revoke(argv[1])
     elif word == "status":
         out = _killswitch.killswitch_status() + "\n" + _escalate.escalate_status()
+    elif word == "orders":
+        from omniuse.tools import payments as _payments
+        out = _payments.order_status()
+    elif word == "paid" and len(argv) > 1:
+        from omniuse.tools import payments as _payments
+        out = _payments.order_mark_paid(argv[1], operator_token=config.operator_token())
     else:
-        out = "Usage: stop | resume | resolve | approve <tool> | revoke <tool> | status"
+        out = "Usage: stop | resume | resolve | approve <tool> | revoke <tool> | status | orders | paid <order_id>"
     print(out)
     return 0
 
@@ -82,7 +102,7 @@ def run_telegram() -> int:
     if not token:
         print("Set OMNIUSE_TELEGRAM_BOT_TOKEN (and _CHAT_ID) to use Telegram mode.")
         return 1
-    print("OmniUse operator daemon running — commands: /stop /resume /resolve /approve /revoke /status")
+    print("OmniUse operator daemon running — commands: /stop /resume /resolve /approve /revoke /status /orders /paid <order_id>")
     offset = 0
     while True:
         try:
