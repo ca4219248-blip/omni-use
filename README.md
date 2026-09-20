@@ -7,7 +7,7 @@
 
 ```
                  ┌─────────────────────────────────────────────────┐
-                 │                    OmniUse 3.0                   │
+                 │                    OmniUse 3.1                   │
                  │                                                 │
    task ──────▶  │  think ──▶ act ──▶ [permissions? killswitch?]  │
                  │    ▲                    │                       │
@@ -18,6 +18,7 @@
                🔒 Policy   💰 Wallet  ⚠️ Escalate  🧠 Memory  🛑 Killswitch
                🖱 Universal 📺 Screen  🔌 Plugins  🚀 Missions  🕒 Scheduler
                🧑‍🤝‍🧑 Team     🧾 Budget   🎨 Design   💸 Payments  🛍 Shop
+               💡 Ideas     🤝 Prospects
 ```
 
 ## What it gives your AI
@@ -39,7 +40,8 @@
 | **team** | `spawn_worker()` — delegate sub-tasks to fresh worker agents (planner + workers) |
 | **design** | `design_poster()` PIL posters (offline) + `design_ai_image()` + `design_watermark()` previews |
 | **payments** | UPI QR (amount pre-filled), order state machine, screenshot reading, **SMS payment verification** |
-| **shop** | Catalog, proposals for inbound clients, listing drafts for your own page |
+| **shop** | Catalog, proposals for inbound clients, listing drafts for your own page, **prospect tracking + outreach drafts (operator-sent, one-message rule)** |
+| **ideas** | `idea_save`/`idea_list`/`idea_update` — a self-starter: when you have no idea, the agent brainstorms, scores and picks one itself |
 
 The agent works with **any OpenAI-compatible LLM** — OpenAI, Groq, OpenRouter, Together, or a local Ollama/vLLM server.
 
@@ -186,6 +188,37 @@ Built-in honesty rules:
 - Inbound only: the agent replies to people who contacted you; it will never cold-DM strangers (spam, rule 2). Listings go on your own accounts, after `policy_check`, with AI disclosure.
 - `order_mark_paid` is denied to the agent — only SMS verification or you (operator token) can flip an order to paid.
 
+## 3.1 — free will (with brakes) 🧠
+
+Tell OmniUse you're out of ideas and it thinks for itself:
+
+```
+you:    "bhai mujhe ₹300 chahiye, mere paas koi idea nahi hai"
+agent:  brainstorms ideas → idea_save (scored: earning vs effort)
+        → idea_list (ranked) → idea_update(best, 'active')
+        → proposes a plan and starts working it
+```
+
+Finding clients — researched by the agent, sent by YOU:
+
+```
+agent:  prospect_add("Sharma Sweets", source="google maps", notes="mithai shop")
+        outreach_draft("Sharma Sweets", "Shop poster design")   → personalised draft
+you:    send it yourself, from your own WhatsApp — once
+        no reply? → prospect_status('contacted')  …and the agent REFUSES any second draft
+        reply?   → prospect_status('replied')     …order flow continues (watermark → QR → /paid)
+```
+
+Why the agent doesn't send first-contact messages itself: automated unsolicited messages get your account banned (spam, platform ToS) — and one honest message from you converts better than a hundred bot blasts anyway.
+
+Confirming a payment from your phone:
+
+```
+/orders              → see every order + state
+/paid ord-1234-abc   → YOU confirming the money arrived — order turns paid
+                       and the agent can deliver the clean file
+```
+
 ## Earning-agent guardrails 🛡️
 
 Wired into the **agent loop itself**, not just the prompt:
@@ -201,10 +234,12 @@ Wired into the **agent loop itself**, not just the prompt:
 ### Operator console
 
 ```bash
-python -m omniuse.operator            # Telegram daemon: /stop /resume /resolve /approve /revoke /status
+python -m omniuse.operator            # Telegram daemon: /stop /resume /resolve /approve /revoke /status /orders /paid <id>
 python -m omniuse.operator stop       # one-shot CLI
 python -m omniuse.operator approve wallet_send
 python -m omniuse.operator status
+python -m omniuse.operator orders      # shop orders
+python -m omniuse.operator paid ord-1234-abc
 ```
 
 ## Phone setup (mobile toolset)
@@ -242,7 +277,7 @@ All config is plain environment variables (see `.env.example`). The essentials:
 - Exposing the hub beyond localhost (`--host 0.0.0.0`) means anyone with the token can run tools on that machine — use a strong token and a firewall.
 - The scheduler runs missions **without a human watching** — keep daily budgets sane, read the mission reports, and keep the killswitch handy.
 - Crypto payments are irreversible — start with a tiny cap and test in queue-only mode (no `OMNIUSE_SEND_CMD`) first.
-- **Shop**: a payment screenshot can be faked — the agent will not deliver the clean file until a credit SMS lands on your phone (or you confirm). Selling means following platform terms and the law; the agent only handles inbound inquiries, never cold outreach.
+- **Shop & outreach**: a payment screenshot can be faked — the agent will not deliver the clean file until a credit SMS lands on your phone (or you `/paid` it yourself). The agent researches prospects and drafts first-contact messages, but **you** send them from your own account — automated unsolicited messages are spam, and platforms ban for it. One message per prospect; never again to non-responders or decliners.
 - "Earning" online still means following platform terms and the law. The guardrails exist so the agent stays on the right side of both; don't disable them.
 - Read the memory log regularly — that's what it's for.
 
